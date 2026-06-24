@@ -120,6 +120,9 @@ export async function processQueue(): Promise<void> {
           toast.success(`"${item.name}" uploaded successfully!`);
         } catch (err: any) {
           console.error(`Upload error for ${item.name}:`, err);
+          await invoke("log_vault_state", {
+            state: `UPLOAD_ERR: ${item.name} size=${item.size} err=${err?.message || JSON.stringify(err)}\nStack: ${err?.stack || "no_stack"}`
+          }).catch(() => {});
           updateQueueItem(item.id, {
             status: "error",
             error: err.message || "Upload failed",
