@@ -58,6 +58,73 @@ fn clear_session(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Saves a key-value pair to a vault file in the app data directory.
+#[tauri::command]
+fn save_vault_value(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    let vault_path = get_vault_path(&app)?;
+    let mut data = if vault_path.exists() {
+        let contents = std::fs::read_to_string(&vault_path)
+            .map_err(|e| format!("Failed to read vault file: {}", e))?;
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&contents)
+            .unwrap_or_default()
+    } else {
+        serde_json::Map::new()
+    };
+    
+    data.insert(key, serde_json::Value::String(value));
+    
+    std::fs::write(&vault_path, serde_json::to_string(&data).unwrap())
+        .map_err(|e| format!("Failed to write vault file: {}", e))
+}
+
+/// Loads a value for a key from the vault file.
+#[tauri::command]
+fn load_vault_value(app: tauri::AppHandle, key: String) -> Result<Option<String>, String> {
+    let vault_path = get_vault_path(&app)?;
+    if !vault_path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&vault_path)
+        .map_err(|e| format!("Failed to read vault file: {}", e))?;
+    let data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse vault file: {}", e))?;
+    
+    if let Some(val) = data.get(&key) {
+        if let Some(s) = val.as_str() {
+            return Ok(Some(s.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// Deletes a key-value pair from the vault file.
+#[tauri::command]
+fn delete_vault_value(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let vault_path = get_vault_path(&app)?;
+    if !vault_path.exists() {
+        return Ok(());
+    }
+    let contents = std::fs::read_to_string(&vault_path)
+        .map_err(|e| format!("Failed to read vault file: {}", e))?;
+    let mut data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse vault file: {}", e))?;
+    
+    data.remove(&key);
+    
+    std::fs::write(&vault_path, serde_json::to_string(&data).unwrap())
+        .map_err(|e| format!("Failed to write vault file: {}", e))
+}
+
+fn get_vault_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+    Ok(data_dir.join("teledrive_vault.json"))
+}
+
 fn get_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data_dir = app
         .path()
@@ -96,6 +163,9 @@ pub fn run() {
             save_session,
             load_session,
             clear_session,
+            save_vault_value,
+            load_vault_value,
+            delete_vault_value,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
