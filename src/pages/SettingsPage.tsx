@@ -1,26 +1,21 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Smartphone, KeyRound, Eye, HardDrive, Info } from "lucide-react";
-import { useAuthStore } from "@/stores/authStore";
+import { ArrowLeft, Smartphone, Eye, HardDrive, Info } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
-import ApiConfigSection from "@/components/settings/ApiConfigSection";
 import TelegramAccountSection from "@/components/settings/TelegramAccountSection";
 import AppearanceSection from "@/components/settings/AppearanceSection";
 import StorageSection from "@/components/settings/StorageSection";
 import AboutSection from "@/components/settings/AboutSection";
 
-type SectionType = "account" | "api" | "appearance" | "storage" | "about";
+type SectionType = "account" | "appearance" | "storage" | "about";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const apiId = useAuthStore((state) => state.apiId);
   const isMobile = useIsMobile();
 
-  // Default active section is API configuration if not set, otherwise Telegram Account
-  const [activeSection, setActiveSection] = useState<SectionType>(
-    apiId ? "account" : "api"
-  );
+  // Default active section is Telegram Account
+  const [activeSection, setActiveSection] = useState<SectionType>("account");
 
   // For mobile navigation flow: nav list -> tap -> shows content screen with a back button to nav list
   const [mobileShowContent, setMobileShowContent] = useState(false);
@@ -31,12 +26,6 @@ export default function SettingsPage() {
       label: "Telegram Account",
       icon: Smartphone,
       component: TelegramAccountSection,
-    },
-    {
-      id: "api" as const,
-      label: "API Configuration",
-      icon: KeyRound,
-      component: ApiConfigSection,
     },
     {
       id: "appearance" as const,
