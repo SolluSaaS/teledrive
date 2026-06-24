@@ -82,6 +82,34 @@ Ensure you have the following installed on your developer machine:
 
 ---
 
+## ⌨️ Keyboard Shortcuts
+
+TeleDrive features powerful keyboard-driven navigation:
+
+- **Search & Navigation**:
+  - `/` or `⌘F`: Focus search input.
+  - `Esc`: Clear selection and blur search.
+  - `g g`: Scroll to the top of the file browser.
+  - `g l`: Scroll to the bottom of the file browser.
+  - `?`: Toggle the keyboard shortcuts help dialog.
+- **Actions on Selection**:
+  - `⌘A`: Select all files in the current view.
+  - `Del` or `Backspace`: Move selected items to Trash (or permanently delete if in Trash view).
+  - `F2`: Rename the selected file/folder.
+  - `⌘D`: Download the selected file.
+
+---
+
+## 📱 Mobile Gestures & Optimization
+
+TeleDrive is fully optimized for mobile touchscreens:
+- **Pull-to-Refresh**: Drag down from the top of the file view (at `scrollTop = 0`) to reload your index directly from your Telegram channel.
+- **Mobile circular FAB**: Bottom-right action button that replaces desktop header controls and opens a bottom sheet to create folders or upload files.
+- **Long-Press Bottom Sheet**: Long press on any file/folder to open a native-style action sheet (Preview, Download, Rename, Star, Delete).
+- **Hardware Back Interception**: Tapping the hardware back button or swiping back on Android intercepts and closes active drawers/modals before modifying page routing history.
+
+---
+
 ## 🔒 Security & Privacy
 
 TeleDrive is built with a zero-knowledge trust design:

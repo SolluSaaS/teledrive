@@ -1,7 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "./stores/authStore";
 import { Loader2 } from "lucide-react";
+import { restoreSession } from "./lib/telegram/restoreSession";
+import { bootstrapTeleDrive } from "./lib/telegram/bootstrap";
+import { Toaster } from "@/components/ui/sonner";
 
 // Lazy pages
 const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
@@ -12,6 +15,7 @@ const TrashPage = lazy(() => import("./pages/TrashPage"));
 const FolderPage = lazy(() => import("./pages/FolderPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
+const SearchPage = lazy(() => import("./pages/SearchPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 // Full-screen spinner fallback
@@ -19,6 +23,29 @@ function LoadingFallback() {
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-background">
       <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
+    </div>
+  );
+}
+
+// Splash Screen Loader
+function SplashLoader({ status }: { status: string }) {
+  return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-4">
+      <svg
+        className="h-16 w-16 text-brand-500 animate-pulse shrink-0"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+      >
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-medium">
+        <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
+        <span className="text-sm">{status}</span>
+      </div>
     </div>
   );
 }
@@ -39,6 +66,28 @@ import { useTheme } from "./hooks/useTheme";
 
 function App() {
   useTheme(); // Initialize theme logic
+  const [isRestoring, setIsRestoring] = useState(true);
+  const [status, setStatus] = useState("Connecting to Telegram...");
+
+  useEffect(() => {
+    async function initSession() {
+      try {
+        const restored = await restoreSession();
+        if (restored) {
+          await bootstrapTeleDrive(setStatus);
+        }
+      } catch (err) {
+        console.error("Failed to restore session on app launch:", err);
+      } finally {
+        setIsRestoring(false);
+      }
+    }
+    initSession();
+  }, []);
+
+  if (isRestoring) {
+    return <SplashLoader status={status} />;
+  }
 
   return (
     <BrowserRouter>
@@ -71,6 +120,7 @@ function App() {
             <Route path="recent" element={<RecentPage />} />
             <Route path="starred" element={<StarredPage />} />
             <Route path="trash" element={<TrashPage />} />
+            <Route path="search" element={<SearchPage />} />
             <Route path="folder/*" element={<FolderPage />} />
           </Route>
 
@@ -81,6 +131,7 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
+      <Toaster />
     </BrowserRouter>
   );
 }
