@@ -156,9 +156,16 @@ export default function TelegramAccountSection() {
             </Button>
             <Button
               className="rounded-full bg-brand-500 hover:bg-brand-600"
-              onClick={() => {
+              onClick={async () => {
                 setIsDialogOpen(false);
-                toast.success("Storage channel re-mapped successfully.");
+                try {
+                  await deleteSecret(VAULT_KEY_CHANNEL_ID);
+                  setChannelId(null);
+                  toast.success("Storage channel reset. Restart the app to re-map it.");
+                } catch (err) {
+                  console.error("Failed to reset storage channel:", err);
+                  toast.error("Failed to reset storage channel.");
+                }
               }}
             >
               Confirm

@@ -124,8 +124,15 @@ function App() {
             <Route path="folder/*" element={<FolderPage />} />
           </Route>
 
-          {/* Settings can be accessed when not authenticated */}
-          <Route path="/settings" element={<SettingsPage />} />
+          {/* Settings protected route */}
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Catch-all */}
           <Route path="*" element={<NotFoundPage />} />

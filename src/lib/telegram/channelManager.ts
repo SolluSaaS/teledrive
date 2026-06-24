@@ -33,8 +33,8 @@ export async function ensureStorageChannel(): Promise<string> {
     const dialogs = await client.getDialogs({});
     for (const dialog of dialogs) {
       // dialog.entity holds the chat/channel info
-      if (dialog.title === "TeleDrive Storage" && dialog.isChannel && dialog.id) {
-        const idStr = dialog.id.toString();
+      if (dialog.title === "TeleDrive Storage" && (dialog.isChannel || dialog.entity?.className === "Channel") && dialog.id) {
+        const idStr = String(dialog.id);
         await saveSecret(VAULT_KEY_CHANNEL_ID, idStr);
         return idStr;
       }
@@ -59,7 +59,7 @@ export async function ensureStorageChannel(): Promise<string> {
       throw new Error("Failed to create storage channel: channel info is missing in updates");
     }
 
-    const idStr = channel.id.toString();
+    const idStr = String(channel.id);
     await saveSecret(VAULT_KEY_CHANNEL_ID, idStr);
     return idStr;
   } catch (err) {

@@ -69,7 +69,7 @@ export async function uploadFileToTelegram(
                 fileId,
                 filePart: partIndex,
                 fileTotalParts: totalParts,
-                bytes: chunkBytes as any, // Cast as any because TS expects Buffer, but webview accepts Uint8Array
+                bytes: Buffer.from(chunkBytes),
               })
             );
           } else {
@@ -77,7 +77,7 @@ export async function uploadFileToTelegram(
               new Api.upload.SaveFilePart({
                 fileId,
                 filePart: partIndex,
-                bytes: chunkBytes as any,
+                bytes: Buffer.from(chunkBytes),
               })
             );
           }

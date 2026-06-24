@@ -25,5 +25,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       sessionString: null,
       phoneNumber: null,
       isAuthenticated: false,
+      apiId: null,
+      apiHash: null,
     }),
 }));
