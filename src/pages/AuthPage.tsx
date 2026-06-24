@@ -14,38 +14,6 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 
-/**
- * GramJS browser fix: the Node.js Buffer polyfill (vm-browserify / buffer package)
- * creates Buffer instances that are subclasses of Uint8Array but have a different
- * constructor tag ("Buffer3"). GramJS's internal SRP/password helpers use strict
- * Uint8Array checks and throw "Bytes or str expected, not Buffer3" when they
- * encounter these polyfilled Buffers.
- *
- * This helper recursively walks an object tree returned by the Telegram API and
- * converts every Buffer-like instance to a plain Uint8Array so that computeCheck
- * receives only native typed arrays.
- */
-function deepConvertBuffers(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  // Buffer polyfill instances are Uint8Array subclasses with a buffer property
-  if (
-    obj instanceof Uint8Array ||
-    (typeof obj === "object" && obj.constructor && obj.constructor.name !== "Uint8Array" && obj instanceof Uint8Array)
-  ) {
-    return new Uint8Array(obj);
-  }
-  if (typeof obj === "object") {
-    for (const key of Object.keys(obj)) {
-      try {
-        obj[key] = deepConvertBuffers(obj[key]);
-      } catch {
-        // Some properties may be non-writable; skip silently
-      }
-    }
-  }
-  return obj;
-}
-
 export default function AuthPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
@@ -221,10 +189,34 @@ export default function AuthPage() {
       const client = getClient();
       const passwordConfig = await client.invoke(new Api.account.GetPassword());
 
-      // Convert any Buffer polyfill instances → Uint8Array before SRP computation
-      // to avoid the "Bytes or str expected, not Buffer3" webview error
-      const sanitizedConfig = deepConvertBuffers(passwordConfig);
-      const srpResult = await computeCheck(sanitizedConfig, password);
+      // --- GramJS browser/webview polyfill fix ---
+      // The Telegram server response is decoded by GramJS using the Node Buffer
+      // polyfill. In Tauri's webview, multiple polyfill instances can be bundled,
+      // creating "Buffer3" objects (a different subclass of Uint8Array) that break
+      // two internal GramJS checks:
+      //
+      //  1. sha256/pbkdf2 in computeHash receives a "Buffer3" that crypto.subtle
+      //     doesn't accept → "Bytes or str expected, not Buffer3"
+      //  2. goodPrime.equals(algo.p) in checkPrimeAndGood receives a plain Uint8Array
+      //     after the previous "fix" and the polyfill's .equals() throws because
+      //     it only accepts Buffer instances → "bad /g in password"
+      //
+      // Fix: re-materialise every byte field with Buffer.from() using the SAME
+      // polyfill instance that GramJS uses internally. Buffer.from(anyUint8Array)
+      // always creates a proper Buffer from the active polyfill, satisfying both
+      // sha256 (needs a BufferSource) and Buffer.equals() (needs a Buffer).
+      const algo = passwordConfig.currentAlgo as any;
+      if (algo) {
+        if (algo.p)     algo.p     = Buffer.from(algo.p);
+        if (algo.salt1) algo.salt1 = Buffer.from(algo.salt1);
+        if (algo.salt2) algo.salt2 = Buffer.from(algo.salt2);
+      }
+      if ((passwordConfig as any).srpB) {
+        (passwordConfig as any).srpB = Buffer.from((passwordConfig as any).srpB);
+      }
+      // -------------------------------------------
+
+      const srpResult = await computeCheck(passwordConfig, password);
 
       await client.invoke(
         new Api.auth.CheckPassword({
