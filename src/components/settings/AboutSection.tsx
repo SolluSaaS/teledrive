@@ -68,19 +68,11 @@ export default function AboutSection() {
 
       <div className="p-5 border rounded-lg bg-background space-y-4">
         <div className="flex items-center gap-3">
-          <svg
-            className="h-12 w-12 text-brand-500 shrink-0"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
+          <img
+            src="/teledrive.png"
+            alt="TeleDrive Logo"
+            className="h-12 w-12 object-contain rounded-xl shadow-sm shrink-0"
+          />
           <div>
             <h4 className="text-md font-bold text-slate-800 dark:text-slate-200">TeleDrive</h4>
             <span className="text-xs text-muted-foreground">Version {version}</span>

@@ -289,17 +289,11 @@ export default function AuthPage() {
       <Card className="w-full max-w-md p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl">
         <div className="text-center mb-6">
           <Link to="/drive/my-drive" className="inline-flex items-center gap-2 mb-4">
-            <svg
-              className="h-10 w-10 text-brand-500 shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
+            <img
+              src="/teledrive.png"
+              alt="TeleDrive Logo"
+              className="h-10 w-10 object-contain rounded-xl shadow-sm shrink-0"
+            />
             <span className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-200">
               TeleDrive
             </span>

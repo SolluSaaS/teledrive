@@ -31,17 +31,11 @@ function LoadingFallback() {
 function SplashLoader({ status }: { status: string }) {
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-4">
-      <svg
-        className="h-16 w-16 text-brand-500 animate-pulse shrink-0"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-      >
-        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-        <path d="M2 17l10 5 10-5" />
-        <path d="M2 12l10 5 10-5" />
-      </svg>
+      <img
+        src="/teledrive.png"
+        alt="TeleDrive Logo"
+        className="h-16 w-16 object-contain animate-pulse shrink-0 rounded-2xl shadow-md"
+      />
       <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-medium">
         <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
         <span className="text-sm">{status}</span>

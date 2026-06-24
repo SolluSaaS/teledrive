@@ -260,8 +260,13 @@ export default function DriveLayout() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="w-[var(--sidebar-width)] p-0 pt-10">
-                <div className="px-6 py-2">
-                  <span className="text-xl font-bold text-brand-500 tracking-tight">TeleDrive</span>
+                <div className="px-6 py-2 flex items-center gap-2">
+                  <img
+                    src="/teledrive.png"
+                    alt="TeleDrive Logo"
+                    className="h-6 w-6 object-contain rounded-lg shadow-sm"
+                  />
+                  <span className="text-xl font-bold text-slate-800 dark:text-slate-200 tracking-tight">TeleDrive</span>
                 </div>
                 <SidebarContent />
               </SheetContent>
@@ -270,19 +275,11 @@ export default function DriveLayout() {
 
           {/* Logo / Title */}
           <Link to="/drive/my-drive" className="flex items-center gap-2">
-            <svg
-              className="h-7 w-7 text-brand-500 shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
+            <img
+              src="/teledrive.png"
+              alt="TeleDrive Logo"
+              className="h-7 w-7 object-contain rounded-lg shadow-sm shrink-0"
+            />
             <span className="hidden sm:inline-block text-lg font-bold tracking-tight text-slate-800 dark:text-slate-200">
               TeleDrive
             </span>
