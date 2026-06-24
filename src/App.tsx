@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { restoreSession } from "./lib/telegram/restoreSession";
 import { bootstrapTeleDrive } from "./lib/telegram/bootstrap";
 import { Toaster } from "@/components/ui/sonner";
+import { invoke } from "@tauri-apps/api/core";
 
 // Lazy pages
 const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
@@ -70,8 +71,11 @@ function App() {
         if (restored) {
           await bootstrapTeleDrive(setStatus);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to restore session on app launch:", err);
+        await invoke("log_vault_state", {
+          state: `BOOTSTRAP_ERR: ${err?.message || JSON.stringify(err)}\nStack: ${err?.stack || "no_stack"}`
+        }).catch(() => {});
       } finally {
         setIsRestoring(false);
       }

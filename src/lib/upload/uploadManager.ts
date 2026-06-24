@@ -4,6 +4,7 @@ import { addFile } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
 import { TeleFile, UploadItem } from "../types";
 import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 
 let isProcessing = false;
 
@@ -22,15 +23,32 @@ export async function processQueue(): Promise<void> {
     const pendingItems = uploadQueue.filter((item) => item.status === "pending");
     const uploadingItems = uploadQueue.filter((item) => item.status === "uploading");
 
+    await invoke("log_vault_state", {
+      state: `PROCESS_QUEUE: pending=${pendingItems.length} uploading=${uploadingItems.length} total=${uploadQueue.length}`
+    });
+
     // Concurrency limit is 3. If full or nothing is pending, exit.
     if (uploadingItems.length >= 3 || pendingItems.length === 0) {
       isProcessing = false;
       return;
     }
 
-    const channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+    await invoke("log_vault_state", { state: "PROCESS_QUEUE: Fetching channelId from vault..." });
+    let channelId: string | null = null;
+    try {
+      channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+      await invoke("log_vault_state", { state: `PROCESS_QUEUE: Fetched channelId = ${channelId}` });
+    } catch (err: any) {
+      await invoke("log_vault_state", {
+        state: `PROCESS_QUEUE_VAULT_ERR: ${err?.message || JSON.stringify(err)}`
+      });
+      isProcessing = false;
+      return;
+    }
+
     if (!channelId) {
       toast.error("Telegram storage channel is not configured. Please check settings.");
+      await invoke("log_vault_state", { state: "PROCESS_QUEUE: channelId is empty/null" });
       isProcessing = false;
       return;
     }
@@ -38,6 +56,10 @@ export async function processQueue(): Promise<void> {
     // Determine how many parallel uploads we can start
     const openSlots = 3 - uploadingItems.length;
     const itemsToStart = pendingItems.slice(0, openSlots);
+
+    await invoke("log_vault_state", {
+      state: `PROCESS_QUEUE: Starting ${itemsToStart.length} uploads`
+    });
 
     isProcessing = false; // Allow other calls to trigger if needed
 

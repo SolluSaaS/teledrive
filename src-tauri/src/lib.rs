@@ -9,9 +9,12 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn log_vault_state(state: String) {
-    // Write directly to vault_state.log in the workspace root directory
+    use std::fs::OpenOptions;
+    use std::io::Write;
     let log_path = std::path::Path::new("vault_state.log");
-    std::fs::write(log_path, state).ok();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        writeln!(file, "{}", state).ok();
+    }
 }
 
 #[tauri::command]
