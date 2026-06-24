@@ -42,7 +42,28 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
 }
 
 /**
+ * Sends a new message and pins it in the channel. Returns the new message ID.
+ */
+async function sendAndPin(channelId: string, text: string): Promise<number> {
+  const client = getClient();
+  const result = await client.sendMessage(channelId, { message: text });
+  await client.invoke(
+    new Api.messages.UpdatePinnedMessage({
+      peer: channelId,
+      id: result.id,
+      unpin: false,
+      silent: true,
+    })
+  );
+  return result.id;
+}
+
+/**
  * Saves the virtual file metadata index to the Telegram channel, chunking it across pinned messages.
+ *
+ * EDIT_MESSAGE_TEMP_RESTRICTED handling:
+ *   Telegram temporarily blocks editing messages in newly-created channels.
+ *   When this error is hit, we fall back to: delete the old msg → send a new one → pin it.
  */
 export async function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
   const client = getClient();
@@ -83,25 +104,48 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
       const text = JSON.stringify(payload);
       
       if (i < currentIndexMessages.length) {
-        // Edit existing pinned message
         const msg = currentIndexMessages[i];
-        await client.editMessage(channelId, {
-          message: msg.id,
-          text: text,
-        });
+        // Try to edit the existing pinned message
+        try {
+          await client.editMessage(channelId, {
+            message: msg.id,
+            text: text,
+          });
+        } catch (editErr: any) {
+          const errMsg: string = editErr?.message || "";
+          // EDIT_MESSAGE_TEMP_RESTRICTED: Telegram won't let us edit this yet.
+          // Also handle MESSAGE_NOT_MODIFIED (content unchanged) gracefully.
+          if (
+            errMsg.includes("EDIT_MESSAGE_TEMP_RESTRICTED") ||
+            errMsg.includes("MESSAGE_NOT_MODIFIED")
+          ) {
+            if (errMsg.includes("MESSAGE_NOT_MODIFIED")) {
+              // Content is identical — nothing to do
+              continue;
+            }
+            // Fallback: unpin + delete old msg, send fresh one
+            try {
+              await client.invoke(
+                new Api.messages.UpdatePinnedMessage({
+                  peer: channelId,
+                  id: msg.id,
+                  unpin: true,
+                  silent: true,
+                })
+              );
+              await client.deleteMessages(channelId, [msg.id], { revoke: true });
+            } catch (cleanupErr) {
+              console.warn("Failed to clean up old index message:", cleanupErr);
+            }
+            await sendAndPin(channelId, text);
+          } else {
+            // Re-throw unexpected errors
+            throw editErr;
+          }
+        }
       } else {
-        // Send a new message
-        const result = await client.sendMessage(channelId, {
-          message: text,
-        });
-        // Pin the new message
-        await client.invoke(
-          new Api.messages.UpdatePinnedMessage({
-            peer: channelId,
-            id: result.id,
-            unpin: false,
-          })
-        );
+        // Send a new message and pin it
+        await sendAndPin(channelId, text);
       }
     }
     
@@ -110,15 +154,14 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
       const extraMessages = currentIndexMessages.slice(chunks.length);
       for (const msg of extraMessages) {
         try {
-          // Unpin message
           await client.invoke(
             new Api.messages.UpdatePinnedMessage({
               peer: channelId,
               id: msg.id,
               unpin: true,
+              silent: true,
             })
           );
-          // Delete message
           await client.deleteMessages(channelId, [msg.id], { revoke: true });
         } catch (e) {
           console.warn(`Failed to clean up extra index message ${msg.id}:`, e);
