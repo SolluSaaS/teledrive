@@ -14,6 +14,38 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 
+/**
+ * GramJS browser fix: the Node.js Buffer polyfill (vm-browserify / buffer package)
+ * creates Buffer instances that are subclasses of Uint8Array but have a different
+ * constructor tag ("Buffer3"). GramJS's internal SRP/password helpers use strict
+ * Uint8Array checks and throw "Bytes or str expected, not Buffer3" when they
+ * encounter these polyfilled Buffers.
+ *
+ * This helper recursively walks an object tree returned by the Telegram API and
+ * converts every Buffer-like instance to a plain Uint8Array so that computeCheck
+ * receives only native typed arrays.
+ */
+function deepConvertBuffers(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  // Buffer polyfill instances are Uint8Array subclasses with a buffer property
+  if (
+    obj instanceof Uint8Array ||
+    (typeof obj === "object" && obj.constructor && obj.constructor.name !== "Uint8Array" && obj instanceof Uint8Array)
+  ) {
+    return new Uint8Array(obj);
+  }
+  if (typeof obj === "object") {
+    for (const key of Object.keys(obj)) {
+      try {
+        obj[key] = deepConvertBuffers(obj[key]);
+      } catch {
+        // Some properties may be non-writable; skip silently
+      }
+    }
+  }
+  return obj;
+}
+
 export default function AuthPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
@@ -188,7 +220,11 @@ export default function AuthPage() {
     try {
       const client = getClient();
       const passwordConfig = await client.invoke(new Api.account.GetPassword());
-      const srpResult = await computeCheck(passwordConfig, password);
+
+      // Convert any Buffer polyfill instances → Uint8Array before SRP computation
+      // to avoid the "Bytes or str expected, not Buffer3" webview error
+      const sanitizedConfig = deepConvertBuffers(passwordConfig);
+      const srpResult = await computeCheck(sanitizedConfig, password);
 
       await client.invoke(
         new Api.auth.CheckPassword({
