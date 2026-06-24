@@ -2,7 +2,6 @@ import { useState } from "react";
 import { HardDrive, RefreshCw, Info } from "lucide-react";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
 export default function StorageSection() {
@@ -65,11 +64,12 @@ export default function StorageSection() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Progress value={storage.percentage} className="h-2 bg-slate-100 dark:bg-slate-900" />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{storage.formattedSize} used</span>
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Unlimited*</span>
+        <div className="space-y-1">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-muted-foreground">{storage.formattedSize} used</span>
+            <span className="font-bold text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800/40 rounded-full px-2.5 py-0.5 select-none">
+              Unlimited Storage Available
+            </span>
           </div>
         </div>
 

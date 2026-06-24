@@ -6,14 +6,14 @@ import { useFileStore } from "@/stores/fileStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import SearchBar from "./SearchBar";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Separator } from "@/components/ui/separator";
+
 import { useEffect, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
-import { triggerFilePicker } from "@/lib/upload/fileSelector";
+import { triggerFilePicker, triggerFolderPicker } from "@/lib/upload/fileSelector";
+import { addFilesToUploadQueue } from "@/lib/upload/uploadManager";
 import { UploadProgressPanel } from "@/components/upload/UploadProgressPanel";
 import { downloadFileFromTelegram } from "@/lib/telegram/downloader";
 import { FilePreviewModal } from "@/components/preview/FilePreviewModal";
@@ -36,6 +36,9 @@ export default function DriveLayout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -84,9 +87,49 @@ export default function DriveLayout() {
   });
 
   // Register upload, download, preview, and refresh listeners
+  // Drag and drop handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounter.current = 0;
+
+    const droppedFiles = e.dataTransfer.files;
+    if (droppedFiles && droppedFiles.length > 0) {
+      addFilesToUploadQueue(Array.from(droppedFiles));
+    }
+  };
+
   useEffect(() => {
     const handleUploadTrigger = () => {
       triggerFilePicker();
+    };
+
+    const handleFolderUploadTrigger = () => {
+      triggerFolderPicker();
     };
 
     const handleDownloadTrigger = (e: Event) => {
@@ -113,12 +156,14 @@ export default function DriveLayout() {
     };
 
     window.addEventListener("teledrive-trigger-upload", handleUploadTrigger);
+    window.addEventListener("teledrive-trigger-folder-upload", handleFolderUploadTrigger);
     window.addEventListener("teledrive-download-file", handleDownloadTrigger);
     window.addEventListener("teledrive-preview-file", handlePreviewTrigger);
     window.addEventListener("teledrive-refresh-files", handleRefreshFiles);
     
     return () => {
       window.removeEventListener("teledrive-trigger-upload", handleUploadTrigger);
+      window.removeEventListener("teledrive-trigger-folder-upload", handleFolderUploadTrigger);
       window.removeEventListener("teledrive-download-file", handleDownloadTrigger);
       window.removeEventListener("teledrive-preview-file", handlePreviewTrigger);
       window.removeEventListener("teledrive-refresh-files", handleRefreshFiles);
@@ -174,11 +219,18 @@ export default function DriveLayout() {
 
   const files = useFileStore((state) => state.files);
 
-  // Calculate mock storage based on actual file sizes in store + 0.5 GB base
+  // Calculate actual storage size based on files in store
   const totalSizeBytes = files.reduce((acc, f) => acc + (f.size || 0), 0);
-  const usedGB = (totalSizeBytes / (1024 * 1024 * 1024) + 0.12).toFixed(2);
-  const limitGB = 15;
-  const storagePercentage = Math.min(Math.round((parseFloat(usedGB) / limitGB) * 100), 100);
+  
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  const formattedUsedSize = formatBytes(totalSizeBytes);
 
   // Extract phone initials (e.g. "+91 9876..." -> "+9")
   const getInitials = (phone: string | null) => {
@@ -198,9 +250,9 @@ export default function DriveLayout() {
   ];
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-900/10">
       {/* Navigation items */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-4 space-y-1.5">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -211,44 +263,60 @@ export default function DriveLayout() {
               key={item.label}
               to={item.path}
               onClick={() => isMobile && setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-full text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 ${
                 isActive
-                  ? "bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-400 font-semibold"
-                  : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-900 hover:text-foreground"
+                  ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 text-brand-600 dark:text-brand-400 shadow-sm"
+                  : "text-muted-foreground hover:bg-slate-100/80 dark:hover:bg-slate-900/50 hover:text-foreground border border-transparent"
               }`}
             >
-              <Icon className="h-5 w-5 shrink-0" />
+              <Icon className="h-4.5 w-4.5 shrink-0" />
               <span>{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
-      <Separator />
-
-      {/* Storage panel */}
-      <div className="p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Database className="h-4 w-4" />
+      {/* Storage panel wrapped in a beautiful card matching the settings design */}
+      <div className="mx-3 mb-4 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/30 shadow-sm space-y-3 select-none">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider">
+          <Database className="h-4 w-4 text-brand-500" />
           <span>Storage</span>
         </div>
-        <Progress value={storagePercentage} className="h-1.5 bg-slate-100 dark:bg-slate-900" />
-        <div className="text-xs text-muted-foreground">
-          {usedGB} GB of {limitGB} GB used
+        <div className="space-y-1.5">
+          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
+            {formattedUsedSize} <span className="text-xs font-normal text-muted-foreground">used</span>
+          </div>
+          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800/40 rounded-full px-2.5 py-0.5 inline-block select-none">
+            Unlimited Storage
+          </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full text-xs font-semibold rounded-full border-brand-200 hover:bg-brand-50 text-brand-600 dark:border-brand-900 dark:text-brand-400 dark:hover:bg-brand-950/20"
-        >
-          Buy storage
-        </Button>
       </div>
     </div>
   );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="flex flex-col h-screen overflow-hidden bg-background text-foreground relative"
+    >
+      {/* Drag & Drop full screen overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/70 dark:bg-slate-950/75 backdrop-blur-md border-4 border-dashed border-brand-500 m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-200 select-none pointer-events-none">
+          <div className="flex flex-col items-center gap-4 text-brand-600 dark:text-brand-400">
+            <div className="p-6 rounded-full bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 animate-bounce">
+              <svg className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-extrabold tracking-tight">Drop files to upload</h2>
+            <p className="text-sm font-semibold text-muted-foreground">Upload directly to the current directory in TeleDrive</p>
+          </div>
+        </div>
+      )}
+      
       {/* Topbar */}
       <header className="flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
@@ -325,7 +393,7 @@ export default function DriveLayout() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (Desktop) */}
         {!isMobile && (
-          <aside className="w-[var(--sidebar-width)] border-r shrink-0 bg-background/50">
+          <aside className="w-[var(--sidebar-width)] border-r border-slate-200 dark:border-slate-800/80 shrink-0">
             <SidebarContent />
           </aside>
         )}
@@ -349,7 +417,7 @@ export default function DriveLayout() {
                 transform: `translate(-50%, 0) rotate(${pullProgress * 3.6}deg)`,
               }}
             >
-              <Loader2 className={cn("h-4.5 w-4.5 text-blue-500", isRefreshing && "animate-spin")} />
+              <Loader2 className={cn("h-4.5 w-4.5 text-brand-500", isRefreshing && "animate-spin")} />
             </div>
           )}
           <Outlet />
@@ -413,7 +481,7 @@ export default function DriveLayout() {
         }}>
           <SheetTrigger asChild>
             <Button
-              className="fixed bottom-20 right-6 h-14 w-14 rounded-full bg-blue-500 hover:bg-blue-600 text-white shadow-xl z-40 flex items-center justify-center transition-transform active:scale-95 border-0 cursor-pointer"
+              className="fixed bottom-20 right-6 h-14 w-14 rounded-full bg-brand-500 hover:bg-brand-600 text-white shadow-xl z-40 flex items-center justify-center transition-transform active:scale-95 border-0 cursor-pointer"
               size="icon"
             >
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -423,7 +491,7 @@ export default function DriveLayout() {
           </SheetTrigger>
           <SheetContent side="bottom" className="rounded-t-2xl px-6 py-5 max-h-[300px] bg-white dark:bg-slate-900 border-t dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wider select-none">Create New</h3>
-            <div className="grid grid-cols-2 gap-4 pb-6 select-none">
+            <div className="grid grid-cols-3 gap-3 pb-6 select-none">
               <button
                 onClick={() => {
                   setMobileActionsOpen(false);
@@ -431,12 +499,12 @@ export default function DriveLayout() {
                   const event = new CustomEvent("teledrive-trigger-create-folder");
                   window.dispatchEvent(event);
                 }}
-                className="flex flex-col items-center justify-center p-4 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
+                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
               >
-                <div className="h-10 w-10 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-500 flex items-center justify-center mb-2">
-                  <HardDrive className="h-5 w-5" />
+                <div className="h-9 w-9 rounded-full bg-brand-50 dark:bg-brand-950/40 text-brand-500 flex items-center justify-center mb-1.5">
+                  <HardDrive className="h-4.5 w-4.5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Folder</span>
+                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Folder</span>
               </button>
 
               <button
@@ -445,14 +513,30 @@ export default function DriveLayout() {
                   if (window.history.state?.modal === "actions") window.history.back();
                   triggerFilePicker();
                 }}
-                className="flex flex-col items-center justify-center p-4 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
+                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
               >
-                <div className="h-10 w-10 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center mb-2">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <div className="h-9 w-9 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center mb-1.5">
+                  <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                   </svg>
                 </div>
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Upload</span>
+                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Files</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setMobileActionsOpen(false);
+                  if (window.history.state?.modal === "actions") window.history.back();
+                  triggerFolderPicker();
+                }}
+                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
+              >
+                <div className="h-9 w-9 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-500 flex items-center justify-center mb-1.5">
+                  <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.5v6m3-3H9m4.062-9.748l2 2A1.5 1.5 0 0115.62 9H19.5A1.5 1.5 0 0121 10.5v9a1.5 1.5 0 01-1.5 1.5H4.5A1.5 1.5 0 013 19.5v-12A1.5 1.5 0 014.5 6h4.88a1.5 1.5 0 011.06.44l2.622 2.622H19.5" />
+                  </svg>
+                </div>
+                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Folder</span>
               </button>
             </div>
           </SheetContent>

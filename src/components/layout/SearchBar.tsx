@@ -53,7 +53,7 @@ export default function SearchBar() {
         onSubmit={handleSubmit}
         className={`relative flex items-center w-full h-11 transition-all duration-200 rounded-full px-4 border ${
           isFocused
-            ? "bg-white dark:bg-slate-900 border-blue-500 shadow-md ring-1 ring-blue-500"
+            ? "bg-white dark:bg-slate-900 border-brand-500 shadow-md ring-1 ring-brand-500"
             : "bg-slate-100 dark:bg-slate-900 border-transparent hover:bg-slate-200/60 dark:hover:bg-slate-800/80"
         }`}
       >

@@ -4,53 +4,90 @@ import {
   getSecret,
   VAULT_KEY_API_ID,
   VAULT_KEY_API_HASH,
-  VAULT_KEY_SESSION,
-  VAULT_KEY_PHONE,
 } from "../secure/vault";
 import { DEFAULT_API_ID, DEFAULT_API_HASH } from "./config";
+import { invoke } from "@tauri-apps/api/core";
 
+/**
+ * Attempts to restore a previously saved Telegram session.
+ *
+ * Session token is stored via a dedicated Rust command (save_session) which
+ * writes a simple JSON file in the app data dir. This is reliable and survives
+ * dev-server restarts without any Stronghold overhead.
+ *
+ * Credentials (API ID / API Hash) are still read from the Stronghold vault so
+ * users who configure custom credentials retain that preference.
+ */
 export async function restoreSession(): Promise<boolean> {
+  console.log("restoreSession: Starting session restoration...");
   try {
-    const apiIdStr = await getSecret(VAULT_KEY_API_ID);
-    const storedApiHash = await getSecret(VAULT_KEY_API_HASH);
-    const sessionString = await getSecret(VAULT_KEY_SESSION);
-    const phoneNumber = await getSecret(VAULT_KEY_PHONE) || "";
+    // ── 1. Load the session token from the file-backed store ──────────────────
+    let sessionString: string | null = null;
+    let phoneNumber: string = "";
 
-    // Use stored custom credentials if available, otherwise fall back to defaults.
-    // Default credentials allow any user to log in via their phone number without
-    // needing to create their own Telegram Developer application.
-    const apiHash = storedApiHash || DEFAULT_API_HASH;
-    const apiId = apiIdStr ? parseInt(apiIdStr, 10) : DEFAULT_API_ID;
-
-    if (isNaN(apiId)) {
+    try {
+      const stored = await invoke<{ session: string | null; phone: string | null }>(
+        "load_session"
+      );
+      sessionString = stored?.session ?? null;
+      phoneNumber   = stored?.phone   ?? "";
+      await invoke("log_vault_state", {
+        state: `RESTORE_LAUNCH: hasSession=${!!sessionString} sessionLen=${sessionString?.length ?? 0} phone=${phoneNumber}`,
+      });
+    } catch (loadErr: any) {
+      await invoke("log_vault_state", {
+        state: `RESTORE_LOAD_ERR: ${loadErr?.message ?? JSON.stringify(loadErr)}`,
+      });
+      // If we can't load, fall through and return false
       return false;
     }
-
-    // Set credentials in Zustand store (custom or default)
-    useAuthStore.getState().setCredentials(apiId, apiHash);
 
     if (!sessionString) {
-      // Credentials are ready but no session string yet (user hasn't logged in)
+      await invoke("log_vault_state", { state: "RESTORE_DONE: No session stored." });
       return false;
     }
 
-    // Initialize the client with the saved session string
+    // ── 2. Resolve API credentials (vault or built-in defaults) ───────────────
+    let apiId   = DEFAULT_API_ID;
+    let apiHash = DEFAULT_API_HASH;
+    try {
+      const storedApiIdStr  = await getSecret(VAULT_KEY_API_ID);
+      const storedApiHash   = await getSecret(VAULT_KEY_API_HASH);
+      if (storedApiIdStr) {
+        const parsed = parseInt(storedApiIdStr, 10);
+        if (!isNaN(parsed)) apiId = parsed;
+      }
+      if (storedApiHash) apiHash = storedApiHash;
+    } catch {
+      // Vault unavailable — built-in defaults already set above
+    }
+
+    // Set credentials in Zustand store
+    useAuthStore.getState().setCredentials(apiId, apiHash);
+
+    // ── 3. Re-initialise the Telegram client and verify the session ───────────
     await initClient(apiId, apiHash, sessionString);
     const client = getClient();
 
-    // Check if the session is still valid/authorized
     const isAuthorized = await client.isUserAuthorized();
+    await invoke("log_vault_state", {
+      state: `RESTORE_AUTH_CHECK: isAuthorized=${isAuthorized}`,
+    });
+
     if (isAuthorized) {
-      // Update auth store to mark as authenticated
       useAuthStore.getState().setSession(sessionString, phoneNumber);
+      await invoke("log_vault_state", { state: "RESTORE_SUCCESS: Session restored successfully." });
       return true;
     } else {
-      // Session is invalid/expired
+      // Session is stale — clear it so the user is not stuck
+      await invoke("clear_session").catch(() => {});
       useAuthStore.getState().logout();
+      await invoke("log_vault_state", { state: "RESTORE_FAIL: Session not authorized. Cleared." });
       return false;
     }
-  } catch (error) {
-    console.error("Failed to restore Telegram session:", error);
+  } catch (error: any) {
+    const errorStr = `RESTORE_EXC: ${error?.message ?? "no_msg"}\nStack: ${error?.stack ?? "no_stack"}`;
+    await invoke("log_vault_state", { state: errorStr });
     useAuthStore.getState().logout();
     return false;
   }

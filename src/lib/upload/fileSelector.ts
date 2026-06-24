@@ -1,83 +1,57 @@
-import { open as tauriOpenDialog } from "@tauri-apps/plugin-dialog";
-import { stat } from "@tauri-apps/plugin-fs";
 import { addFilesToUploadQueue } from "./uploadManager";
 
 /**
- * Maps common file extensions to standard MIME types.
+ * Triggers the standard HTML browser file picker and enqueues selected files for upload.
+ * This completely bypasses Tauri's fs permissions and scope constraints.
  */
-function getMimeType(fileName: string): string {
-  const ext = fileName.split(".").pop()?.toLowerCase();
-  const mimes: Record<string, string> = {
-    pdf: "application/pdf",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    mp4: "video/mp4",
-    mkv: "video/x-matroska",
-    avi: "video/x-msvideo",
-    mov: "video/quicktime",
-    mp3: "audio/mpeg",
-    wav: "audio/wav",
-    ogg: "audio/ogg",
-    zip: "application/zip",
-    rar: "application/vnd.rar",
-    tar: "application/x-tar",
-    gz: "application/gzip",
-    txt: "text/plain",
-    md: "text/markdown",
-    json: "application/json",
-    html: "text/html",
-    css: "text/css",
-    js: "application/javascript",
-    ts: "application/typescript",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  };
-  
-  return ext && mimes[ext] ? mimes[ext] : "application/octet-stream";
+export async function triggerFilePicker(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+
+    input.onchange = (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files && files.length > 0) {
+        addFilesToUploadQueue(Array.from(files));
+      }
+      resolve();
+    };
+
+    input.oncancel = () => {
+      resolve();
+    };
+
+    input.click();
+  });
 }
 
 /**
- * Triggers the native Tauri file picker and enqueues chosen files for upload.
+ * Triggers the standard HTML browser directory picker and enqueues selected files for upload.
+ * This selects folders and enqueues all files inside recursively.
  */
-export async function triggerFilePicker(): Promise<void> {
-  try {
-    const selected = await tauriOpenDialog({
-      multiple: true,
-      directory: false,
-    });
+export async function triggerFolderPicker(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    
+    // Set folder select attributes for WebKit/Blink browsers
+    input.setAttribute("webkitdirectory", "");
+    input.setAttribute("directory", "");
 
-    if (!selected) return;
-
-    // Convert result to array of paths
-    const filePaths = Array.isArray(selected) ? selected : [selected];
-    const filesToEnqueue = [];
-
-    for (const path of filePaths) {
-      try {
-        const fileMetadata = await stat(path);
-        const name = path.split(/[/\\]/).pop() || "unknown_file";
-        const size = fileMetadata.size;
-        const type = getMimeType(name);
-
-        filesToEnqueue.push({
-          name,
-          size,
-          path,
-          type,
-        });
-      } catch (err) {
-        console.error(`Failed to get metadata for selected file: ${path}`, err);
+    input.onchange = (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files && files.length > 0) {
+        addFilesToUploadQueue(Array.from(files));
       }
-    }
+      resolve();
+    };
 
-    if (filesToEnqueue.length > 0) {
-      addFilesToUploadQueue(filesToEnqueue);
-    }
-  } catch (error) {
-    console.error("Error choosing files in dialog:", error);
-  }
+    input.oncancel = () => {
+      resolve();
+    };
+
+    input.click();
+  });
 }

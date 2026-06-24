@@ -12,6 +12,60 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      // Diagnostic tool to display runtime errors if the React app fails to mount
+      window.addEventListener('error', function(event) {
+        var errDiv = document.getElementById('teledrive-fatal-error');
+        if (!errDiv) {
+          errDiv = document.createElement('div');
+          errDiv.id = 'teledrive-fatal-error';
+          errDiv.style.position = 'fixed';
+          errDiv.style.top = '0';
+          errDiv.style.left = '0';
+          errDiv.style.width = '100vw';
+          errDiv.style.height = '100vh';
+          errDiv.style.background = '#1e1b4b';
+          errDiv.style.color = '#fda4af';
+          errDiv.style.padding = '24px';
+          errDiv.style.zIndex = '999999';
+          errDiv.style.fontFamily = 'monospace';
+          errDiv.style.fontSize = '12px';
+          errDiv.style.overflow = 'auto';
+          errDiv.style.boxSizing = 'border-box';
+          document.body.appendChild(errDiv);
+        }
+        errDiv.innerHTML = '<h1 style="font-size:16px;font-weight:bold;margin-bottom:8px;color:#f43f5e">Fatal Launch Error</h1>' +
+          '<p style="margin-bottom:16px;color:#e2e8f0">' + event.message + '</p>' +
+          '<pre style="background:#0f172a;padding:12px;border-radius:8px;color:#cbd5e1;overflow-x:auto">' + 
+          'Source: ' + event.filename + ':' + event.lineno + ':' + event.colno + '\n\n' +
+          (event.error ? event.error.stack : '') + '</pre>';
+      });
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var errDiv = document.getElementById('teledrive-fatal-error');
+        if (!errDiv) {
+          errDiv = document.createElement('div');
+          errDiv.id = 'teledrive-fatal-error';
+          errDiv.style.position = 'fixed';
+          errDiv.style.top = '0';
+          errDiv.style.left = '0';
+          errDiv.style.width = '100vw';
+          errDiv.style.height = '100vh';
+          errDiv.style.background = '#1e1b4b';
+          errDiv.style.color = '#fda4af';
+          errDiv.style.padding = '24px';
+          errDiv.style.zIndex = '999999';
+          errDiv.style.fontFamily = 'monospace';
+          errDiv.style.fontSize = '12px';
+          errDiv.style.overflow = 'auto';
+          errDiv.style.boxSizing = 'border-box';
+          document.body.appendChild(errDiv);
+        }
+        var reason = event.reason ? (event.reason.stack || event.reason.message || event.reason) : 'Unknown Promise Rejection';
+        errDiv.innerHTML = '<h1 style="font-size:16px;font-weight:bold;margin-bottom:8px;color:#f43f5e">Unhandled Promise Rejection</h1>' +
+          '<pre style="background:#0f172a;padding:12px;border-radius:8px;color:#cbd5e1;overflow-x:auto">' + reason + '</pre>';
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

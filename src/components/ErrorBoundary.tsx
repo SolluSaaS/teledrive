@@ -39,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </p>
           <Button
             onClick={() => window.location.reload()}
-            className="rounded-full bg-blue-500 hover:bg-blue-600 font-semibold px-5 text-sm gap-1.5 shadow-sm text-white"
+            className="rounded-xl bg-brand-500 hover:bg-brand-600 font-semibold px-5 text-sm gap-1.5 shadow-sm text-white"
           >
             <RotateCcw className="h-4 w-4" />
             Reload Page

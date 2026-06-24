@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
 
 export default function TelegramAccountSection() {
   const navigate = useNavigate();
@@ -31,9 +32,12 @@ export default function TelegramAccountSection() {
 
   const handleDisconnect = async () => {
     try {
-      await deleteSecret(VAULT_KEY_SESSION);
-      await deleteSecret(VAULT_KEY_PHONE);
-      await deleteSecret(VAULT_KEY_CHANNEL_ID);
+      // Clear the primary file-backed session store
+      await invoke("clear_session").catch(() => {});
+      // Also clear Stronghold vault secrets (best-effort)
+      await deleteSecret(VAULT_KEY_SESSION).catch(() => {});
+      await deleteSecret(VAULT_KEY_PHONE).catch(() => {});
+      await deleteSecret(VAULT_KEY_CHANNEL_ID).catch(() => {});
       logout();
       toast.success("Disconnected Telegram account successfully.");
       navigate("/auth");

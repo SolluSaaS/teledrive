@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 
 export default function AuthPage() {
   const navigate = useNavigate();
@@ -236,9 +237,21 @@ export default function AuthPage() {
   const completeAuthentication = async (client: any) => {
     const sessionString = client.session.save() as string;
     
-    // Save credentials to Stronghold vault
-    await saveSecret(VAULT_KEY_SESSION, sessionString);
-    await saveSecret(VAULT_KEY_PHONE, phone.trim());
+    // ── Primary: save session to the Rust file-backed store ──────────────────
+    // This is reliable, fast, and survives dev-server restarts.
+    try {
+      await invoke("save_session", { session: sessionString, phone: phone.trim() });
+    } catch (saveErr) {
+      console.error("save_session (Rust) failed:", saveErr);
+    }
+
+    // ── Secondary: also persist to Stronghold vault (best-effort) ────────────
+    try {
+      await saveSecret(VAULT_KEY_SESSION, sessionString);
+      await saveSecret(VAULT_KEY_PHONE, phone.trim());
+    } catch (vaultErr) {
+      console.warn("Stronghold saveSecret failed (non-fatal):", vaultErr);
+    }
 
     // Update Zustand store
     setSession(sessionString, phone.trim());

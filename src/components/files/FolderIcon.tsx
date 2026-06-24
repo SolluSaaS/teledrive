@@ -16,7 +16,7 @@ export function FolderIcon({ className, size = "md", ...props }: FolderIconProps
   return (
     <svg
       className={cn(
-        "text-blue-500 dark:text-blue-400 fill-blue-50/30 dark:fill-blue-950/20 shrink-0 transition-transform duration-200 group-hover:scale-105",
+        "text-brand-500 dark:text-brand-400 fill-brand-50/30 dark:fill-brand-950/20 shrink-0 transition-transform duration-200 group-hover:scale-105",
         sizeClasses[size],
         className
       )}

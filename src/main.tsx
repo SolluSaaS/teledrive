@@ -5,23 +5,30 @@ import "./index.css";
 import { initVault } from "./lib/secure/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
+console.log("main.tsx: Loaded entrypoint script");
+
+// Mount React immediately to prevent blank white screens
+const rootElement = document.getElementById("root");
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+  console.log("main.tsx: React root mounted immediately.");
+} else {
+  console.error("main.tsx: Root element not found in DOM!");
+}
+
+// Initialize vault in the background
+console.log("main.tsx: Initializing vault in background...");
 initVault()
   .then(() => {
-    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-      <React.StrictMode>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
-      </React.StrictMode>,
-    );
+    console.log("main.tsx: Vault initialized successfully in background.");
   })
   .catch((err) => {
-    console.error("Critical error: Failed to init vault:", err);
-    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-      <React.StrictMode>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
-      </React.StrictMode>,
-    );
+    console.error("main.tsx: Vault initialization failed in background:", err);
   });
+

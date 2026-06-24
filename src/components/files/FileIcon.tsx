@@ -65,7 +65,7 @@ export function FileIcon({ mime, size = "md", className }: FileIconProps) {
       m.includes("msword") ||
       m === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
-      return { Icon: FileText, colorClass: "text-blue-500 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20" };
+      return { Icon: FileText, colorClass: "text-brand-500 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-950/20" };
     }
 
     // Presentations / Slides

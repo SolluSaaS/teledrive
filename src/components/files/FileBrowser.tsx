@@ -218,6 +218,13 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const displayFiles = getFilteredFiles();
 
+  const folders = displayFiles.filter(
+    (f) => f.mime === "inode/directory" || f.mime === "application/x-directory"
+  );
+  const regularFiles = displayFiles.filter(
+    (f) => f.mime !== "inode/directory" && f.mime !== "application/x-directory"
+  );
+
   // Breadcrumbs calculation
   const getBreadcrumbs = () => {
     if (folderPath === "/") return [];
@@ -271,6 +278,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const triggerUpload = () => {
     const event = new CustomEvent("teledrive-trigger-upload");
+    window.dispatchEvent(event);
+  };
+
+  const triggerFolderUpload = () => {
+    const event = new CustomEvent("teledrive-trigger-folder-upload");
     window.dispatchEvent(event);
   };
 
@@ -388,6 +400,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       case "search":
         return `Search results for "${searchQuery}"`;
       default:
+        if (folderPath !== "/") {
+          const segments = folderPath.split("/").filter(Boolean);
+          return segments[segments.length - 1] || "My Drive";
+        }
         return "My Drive";
     }
   };
@@ -422,8 +438,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto animate-fade-in">
         <div className="relative mb-6">
-          <div className="absolute inset-0 bg-blue-100/40 dark:bg-blue-950/20 blur-xl rounded-full scale-150 animate-pulse" />
-          <Icon className="relative h-16 w-16 text-blue-500/80 stroke-[1.5]" />
+          <div className="absolute inset-0 bg-brand-100/40 dark:bg-brand-950/20 blur-xl rounded-full scale-150 animate-pulse" />
+          <Icon className="relative h-16 w-16 text-brand-500/80 stroke-[1.5]" />
         </div>
 
         <h3 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">
@@ -438,7 +454,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           <div className="flex gap-3 justify-center">
             <Button
               onClick={triggerUpload}
-              className="rounded-full bg-blue-500 hover:bg-blue-600 font-semibold px-5 text-sm shadow-sm"
+              className="rounded-xl bg-brand-500 hover:bg-brand-600 font-semibold px-5 text-sm shadow-sm"
             >
               <Upload className="mr-2 h-4 w-4" />
               Upload Files
@@ -446,7 +462,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <Button
               variant="outline"
               onClick={() => setCreateDialogOpen(true)}
-              className="rounded-full font-semibold px-5 text-sm"
+              className="rounded-xl font-semibold px-5 text-sm border-slate-200 dark:border-slate-800"
             >
               <FolderPlus className="mr-2 h-4 w-4" />
               New Folder
@@ -458,65 +474,85 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
+    <div className="flex flex-col h-full p-4 md:p-6 lg:p-8 space-y-6">
       {/* File Browser Header Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b pb-3 shrink-0">
-        {mode === "drive" ? (
-          <div className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-400 overflow-x-auto whitespace-nowrap py-1">
-            <Link
-              to="/drive/my-drive"
-              onClick={clearSelection}
-              className="flex items-center gap-1.5 hover:text-blue-500 transition-colors font-medium"
-            >
-              <Home className="h-4 w-4 shrink-0 text-slate-500" />
-              <span className="font-semibold text-slate-700 dark:text-slate-300">My Drive</span>
-            </Link>
-
-            {breadcrumbs.map((crumb, idx) => (
-              <div key={crumb.link} className="flex items-center gap-1 shrink-0">
-                <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                {idx === breadcrumbs.length - 1 ? (
-                  <span className="font-bold text-slate-800 dark:text-slate-200 px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-xs">
-                    {crumb.name}
-                  </span>
-                ) : (
-                  <Link
-                    to={crumb.link}
-                    onClick={clearSelection}
-                    className="hover:text-blue-500 transition-colors font-semibold text-xs text-slate-700 dark:text-slate-300"
-                  >
-                    {crumb.name}
-                  </Link>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-200 dark:border-slate-800/60 pb-4 shrink-0">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-850 dark:text-slate-100">
             {getHeaderTitle()}
-          </h2>
-        )}
+          </h1>
+          {mode === "drive" && breadcrumbs.length > 0 && (
+            <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto whitespace-nowrap py-1">
+              <Link
+                to="/drive/my-drive"
+                onClick={clearSelection}
+                className="flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400"
+              >
+                <Home className="h-3.5 w-3.5 shrink-0" />
+                <span>My Drive</span>
+              </Link>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+              {breadcrumbs.map((crumb, idx) => (
+                <div key={crumb.link} className="flex items-center gap-1 shrink-0">
+                  <ChevronRight className="h-3 w-3 text-slate-400 shrink-0" />
+                  {idx === breadcrumbs.length - 1 ? (
+                    <span className="font-bold text-slate-800 dark:text-slate-200 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/80">
+                      {crumb.name}
+                    </span>
+                  ) : (
+                    <Link
+                      to={crumb.link}
+                      onClick={clearSelection}
+                      className="hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400"
+                    >
+                      {crumb.name}
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto sm:mt-1">
           {mode === "drive" && (
             <>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setCreateDialogOpen(true)}
-                className="h-8.5 rounded-xl text-xs gap-1.5 font-semibold"
+                className="h-8.5 rounded-xl text-xs gap-1.5 font-semibold border-slate-200 dark:border-slate-800"
               >
-                <FolderPlus className="h-3.5 w-3.5 text-blue-500" />
+                <FolderPlus className="h-3.5 w-3.5 text-brand-500" />
                 <span>New Folder</span>
               </Button>
-              <Button
-                size="sm"
-                onClick={triggerUpload}
-                className="h-8.5 rounded-xl text-xs bg-blue-500 hover:bg-blue-600 font-semibold gap-1.5 text-white shadow-sm"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                <span>Upload</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="h-8.5 rounded-xl text-xs bg-brand-500 hover:bg-brand-600 font-semibold gap-1.5 text-white shadow-sm cursor-pointer border-0"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Upload</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="rounded-xl p-1 bg-white dark:bg-slate-900 border dark:border-slate-200 dark:border-slate-800 shadow-lg">
+                  <DropdownMenuItem
+                    onClick={triggerUpload}
+                    className="rounded-lg text-xs font-semibold px-3 py-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Upload className="mr-2 h-3.5 w-3.5 text-blue-500" />
+                    Upload Files
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={triggerFolderUpload}
+                    className="rounded-lg text-xs font-semibold px-3 py-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Folder className="mr-2 h-3.5 w-3.5 text-amber-500" />
+                    Upload Folder
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
 
@@ -569,10 +605,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 type="button"
                 onClick={() => setFilterType(filter)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-semibold rounded-full border transition-all cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer whitespace-nowrap duration-150",
                   isActive
-                    ? "bg-blue-100 hover:bg-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
-                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-transparent text-slate-600 dark:text-slate-300"
+                    ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-sm"
+                    : "bg-slate-100/80 dark:bg-slate-900/50 border-transparent text-muted-foreground hover:bg-slate-200/50 dark:hover:bg-slate-800/80 hover:text-foreground"
                 )}
               >
                 {filter}
@@ -611,7 +647,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   onClick={() => setSortBy(opt.value)}
                   className={cn(
                     "flex items-center justify-between px-3 py-2 text-xs rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200",
-                    sortBy === opt.value && "font-bold text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/10"
+                    sortBy === opt.value && "font-bold text-brand-600 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-950/10"
                   )}
                 >
                   <span>{opt.label}</span>
@@ -642,64 +678,131 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         renderEmptyState()
       ) : viewMode === "grid" ? (
         /* GRID VIEW */
-        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
-            {displayFiles.map((file) => {
-              const isSelected = selectedIds.includes(file.id);
-              const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
-              
-              return (
-                <FileContextMenu
-                  key={file.id}
-                  file={file}
-                  onPreview={toastPreview}
-                  onDownload={handleDownload}
-                  onRename={openRenameDialog}
-                  onStarToggle={toggleStar}
-                  onTrash={moveToTrash}
-                >
-                  <div
-                    onClick={(e) => handleItemClick(e, file)}
-                    onDoubleClick={() => handleItemDoubleClick(file)}
-                    onTouchStart={() => handleTouchStartItem(file)}
-                    onTouchEnd={handleTouchEndItem}
-                    onTouchMove={handleTouchEndItem}
-                    className={cn(
-                      "group relative flex flex-col justify-between p-3 rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-200 cursor-pointer text-left hover:shadow-md",
-                      isSelected
-                        ? "border-blue-500 bg-blue-50/50 dark:border-blue-500 dark:bg-blue-950/20 ring-1 ring-blue-500"
-                        : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-1 mb-3">
-                      <FileIcon mime={file.mime} size="md" />
-                      <FileActionsMenu
-                        file={file}
-                        onPreview={toastPreview}
-                        onDownload={handleDownload}
-                        onRename={openRenameDialog}
-                        onStarToggle={toggleStar}
-                        onTrash={moveToTrash}
-                      />
-                    </div>
-                    
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate pr-4">
-                        {file.name}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {isDir ? "Folder" : `${(file.size / (1024 * 1024)).toFixed(2)} MB`}
-                      </p>
-                    </div>
+        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20 pr-1 space-y-8">
+          {/* Folders Section */}
+          {folders.length > 0 && (
+            <div className="space-y-3">
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                Folders
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
+                {folders.map((folder) => {
+                  const isSelected = selectedIds.includes(folder.id);
+                  return (
+                    <FileContextMenu
+                      key={folder.id}
+                      file={folder}
+                      onPreview={toastPreview}
+                      onDownload={handleDownload}
+                      onRename={openRenameDialog}
+                      onStarToggle={toggleStar}
+                      onTrash={moveToTrash}
+                    >
+                      <div
+                        onClick={(e) => handleItemClick(e, folder)}
+                        onDoubleClick={() => handleItemDoubleClick(folder)}
+                        onTouchStart={() => handleTouchStartItem(folder)}
+                        onTouchEnd={handleTouchEndItem}
+                        onTouchMove={handleTouchEndItem}
+                        className={cn(
+                          "group relative flex items-center justify-between p-3.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-200 cursor-pointer hover:shadow-sm select-none",
+                          isSelected
+                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-500 dark:bg-brand-950/20 ring-1 ring-brand-500"
+                            : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                        )}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 pr-6">
+                          <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                            {folder.name}
+                          </span>
+                        </div>
+                        <div className="absolute right-2" onClick={(e) => e.stopPropagation()}>
+                          <FileActionsMenu
+                            file={folder}
+                            onPreview={toastPreview}
+                            onDownload={handleDownload}
+                            onRename={openRenameDialog}
+                            onStarToggle={toggleStar}
+                            onTrash={moveToTrash}
+                          />
+                        </div>
+                      </div>
+                    </FileContextMenu>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-                    {file.starred && (
-                      <Star className="absolute bottom-3 right-3 h-3 w-3 fill-amber-400 text-amber-400" />
-                    )}
-                  </div>
-                </FileContextMenu>
-              );
-            })}
-          </div>
+          {/* Files Section */}
+          {regularFiles.length > 0 && (
+            <div className="space-y-3">
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                Files
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {regularFiles.map((file) => {
+                  const isSelected = selectedIds.includes(file.id);
+                  return (
+                    <FileContextMenu
+                      key={file.id}
+                      file={file}
+                      onPreview={toastPreview}
+                      onDownload={handleDownload}
+                      onRename={openRenameDialog}
+                      onStarToggle={toggleStar}
+                      onTrash={moveToTrash}
+                    >
+                      <div
+                        onClick={(e) => handleItemClick(e, file)}
+                        onDoubleClick={() => handleItemDoubleClick(file)}
+                        onTouchStart={() => handleTouchStartItem(file)}
+                        onTouchEnd={handleTouchEndItem}
+                        onTouchMove={handleTouchEndItem}
+                        className={cn(
+                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-200 cursor-pointer overflow-hidden text-left hover:shadow-md select-none h-44",
+                          isSelected
+                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-500 dark:bg-brand-950/20 ring-1 ring-brand-500"
+                            : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                        )}
+                      >
+                        {/* Upper icon/preview box */}
+                        <div className="flex-1 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center p-4 relative border-b border-slate-100 dark:border-slate-800/40">
+                          <FileIcon mime={file.mime} size="lg" />
+                          {file.starred && (
+                            <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          )}
+                        </div>
+
+                        {/* Lower text & action menu info */}
+                        <div className="p-3 flex items-center justify-between gap-2 bg-white dark:bg-slate-900">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate pr-1">
+                              {file.name}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {(file.size / (1024 * 1024)).toFixed(2)} MB
+                            </p>
+                          </div>
+                          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                            <FileActionsMenu
+                              file={file}
+                              onPreview={toastPreview}
+                              onDownload={handleDownload}
+                              onRename={openRenameDialog}
+                              onStarToggle={toggleStar}
+                              onTrash={moveToTrash}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </FileContextMenu>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* LIST VIEW */
@@ -718,7 +821,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         clearSelection();
                       }
                     }}
-                    className="rounded border-slate-300 dark:border-slate-700 text-blue-500 focus:ring-blue-500"
+                    className="rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500"
                   />
                 </th>
                 <th className="py-3 px-4">Name</th>
@@ -751,7 +854,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onTouchMove={handleTouchEndItem}
                       className={cn(
                         "group border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors duration-150",
-                        isSelected && "bg-blue-50/40 dark:bg-blue-950/15"
+                        isSelected && "bg-brand-50/40 dark:bg-brand-950/15"
                       )}
                     >
                       <td className="py-2.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
@@ -759,7 +862,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(file.id)}
-                          className="rounded border-slate-300 dark:border-slate-700 text-blue-500 focus:ring-blue-500"
+                          className="rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500"
                         />
                       </td>
                       <td className="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
@@ -882,7 +985,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <Button
                 type="submit"
                 disabled={!newFolderName.trim()}
-                className="rounded-xl h-10 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold px-4"
+                className="rounded-xl h-10 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold px-4"
               >
                 Create
               </Button>
@@ -917,7 +1020,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <Button
                 type="submit"
                 disabled={!newFileName.trim()}
-                className="rounded-xl h-10 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold px-4"
+                className="rounded-xl h-10 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold px-4"
               >
                 Rename
               </Button>
