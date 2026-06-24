@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { Buffer } from "buffer";
 
 export default function AuthPage() {
   const navigate = useNavigate();

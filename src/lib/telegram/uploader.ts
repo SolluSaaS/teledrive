@@ -2,6 +2,7 @@ import { Api } from "telegram";
 import { getClient } from "./client";
 import { open as tauriOpen, SeekMode } from "@tauri-apps/plugin-fs";
 import bigInt from "big-integer";
+import { Buffer } from "buffer";
 
 const CHUNK_SIZE = 512 * 1024; // 512KB recommended chunk size for Telegram
 
