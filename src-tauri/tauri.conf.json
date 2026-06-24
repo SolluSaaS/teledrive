@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri://localhost; connect-src 'self' wss://*.web.telegram.org/ https://*.web.telegram.org/ http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://127.0.0.1:1420 ipc: tauri:; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.web.telegram.org/; media-src 'self' blob: data: https://*.web.telegram.org/; font-src 'self' data:;"
     }
   },
   "bundle": {

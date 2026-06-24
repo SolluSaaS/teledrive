@@ -1,25 +1,29 @@
 import React, { useState, useEffect } from "react";
-import { Globe, Smartphone, Code2, PlusCircle, KeyRound, AlertTriangle } from "lucide-react";
+import { Globe, Smartphone, Code2, PlusCircle, KeyRound, AlertTriangle, Sparkles, RotateCcw } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useAuthStore } from "@/stores/authStore";
-import { saveSecret, getSecret, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
+import { saveSecret, getSecret, deleteSecret, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
+import { DEFAULT_API_ID, DEFAULT_API_HASH } from "@/lib/telegram/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 export default function ApiConfigSection() {
   const apiId = useAuthStore((state) => state.apiId);
   const setCredentials = useAuthStore((state) => state.setCredentials);
 
-  const [isEditing, setIsEditing] = useState(!apiId);
+  // Tracks whether the active credentials are the built-in defaults or custom user-defined ones
+  const [isUsingDefault, setIsUsingDefault] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
   const [formApiId, setFormApiId] = useState("");
   const [formApiHash, setFormApiHash] = useState("");
   const [errors, setErrors] = useState<{ apiId?: string; apiHash?: string }>({});
 
   useEffect(() => {
-    // Load current credentials from vault if not in state
+    // Load current credentials from vault; if present they override defaults
     async function loadCreds() {
       const savedId = await getSecret(VAULT_KEY_API_ID);
       const savedHash = await getSecret(VAULT_KEY_API_HASH);
@@ -27,11 +31,36 @@ export default function ApiConfigSection() {
         setCredentials(parseInt(savedId), savedHash);
         setFormApiId(savedId);
         setFormApiHash(savedHash);
+        setIsUsingDefault(false);
+        setIsEditing(false);
+      } else {
+        // No custom creds in vault — using built-in defaults
+        setCredentials(DEFAULT_API_ID, DEFAULT_API_HASH);
+        setFormApiId("");
+        setFormApiHash("");
+        setIsUsingDefault(true);
         setIsEditing(false);
       }
     }
     loadCreds();
   }, [setCredentials]);
+
+  const handleResetToDefault = async () => {
+    try {
+      await deleteSecret(VAULT_KEY_API_ID);
+      await deleteSecret(VAULT_KEY_API_HASH);
+      setCredentials(DEFAULT_API_ID, DEFAULT_API_HASH);
+      setFormApiId("");
+      setFormApiHash("");
+      setIsUsingDefault(true);
+      setIsEditing(false);
+      setErrors({});
+      toast.success("Credentials reset to built-in defaults.");
+    } catch (err) {
+      console.error("Failed to reset credentials:", err);
+      toast.error("Failed to reset credentials.");
+    }
+  };
 
   const handleOpenPortal = async () => {
     try {
@@ -65,6 +94,7 @@ export default function ApiConfigSection() {
       await saveSecret(VAULT_KEY_API_ID, formApiId.toString());
       await saveSecret(VAULT_KEY_API_HASH, cleanHash);
       setCredentials(idNum, cleanHash);
+      setIsUsingDefault(false);
       setIsEditing(false);
       setErrors({});
       toast.success("Telegram API credentials saved successfully!");
@@ -202,23 +232,52 @@ export default function ApiConfigSection() {
         </form>
       ) : (
         <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border space-y-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-xs text-muted-foreground block">API ID</span>
-              <span className="font-semibold font-mono">{maskValue(apiId)}</span>
+          {/* Default credentials badge */}
+          {isUsingDefault && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-brand-50 dark:bg-brand-950/20 border border-brand-200 dark:border-brand-800">
+              <Sparkles className="h-4 w-4 text-brand-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-brand-700 dark:text-brand-400">Using built-in default credentials</p>
+                <p className="text-xs text-brand-600/70 dark:text-brand-500/70">
+                  All users share these credentials. Save your own API keys for a dedicated app.
+                </p>
+              </div>
+              <Badge className="bg-brand-500 hover:bg-brand-600 border-0 text-xs shrink-0">Default</Badge>
             </div>
-            <div>
-              <span className="text-xs text-muted-foreground block">API Hash</span>
-              <span className="font-semibold font-mono">********************************</span>
+          )}
+
+          {!isUsingDefault && (
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-xs text-muted-foreground block">API ID</span>
+                <span className="font-semibold font-mono">{maskValue(apiId)}</span>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground block">API Hash</span>
+                <span className="font-semibold font-mono">********************************</span>
+              </div>
             </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="rounded-full text-xs font-semibold px-4 border-brand-200 text-brand-600 hover:bg-brand-50"
+              onClick={() => setIsEditing(true)}
+            >
+              {isUsingDefault ? "Set Custom Credentials" : "Change Credentials"}
+            </Button>
+            {!isUsingDefault && (
+              <Button
+                variant="outline"
+                className="rounded-full text-xs font-semibold px-4 border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center gap-1.5"
+                onClick={handleResetToDefault}
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset to Default
+              </Button>
+            )}
           </div>
-          <Button
-            variant="outline"
-            className="rounded-full text-xs font-semibold px-4 border-brand-200 text-brand-600 hover:bg-brand-50"
-            onClick={() => setIsEditing(true)}
-          >
-            Change Credentials
-          </Button>
         </div>
       )}
 

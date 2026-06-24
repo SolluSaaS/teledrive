@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { ShieldAlert, AlertTriangle, Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
 import { Api } from "telegram";
 import { computeCheck } from "telegram/Password";
 import { useAuthStore } from "@/stores/authStore";
 import { initClient, getClient } from "@/lib/telegram/client";
 import { saveSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
+import { DEFAULT_API_ID, DEFAULT_API_HASH } from "@/lib/telegram/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,12 +49,15 @@ export default function AuthPage() {
       try {
         const id = await getSecret(VAULT_KEY_API_ID);
         const hash = await getSecret(VAULT_KEY_API_HASH);
-        if (id && hash) {
-          setConfigApiId(parseInt(id));
-          setConfigApiHash(hash);
-        }
+        // Use custom vault credentials if present, otherwise fall back to built-in defaults.
+        // This allows any user to log in immediately without configuring their own API app.
+        setConfigApiId(id ? parseInt(id) : DEFAULT_API_ID);
+        setConfigApiHash(hash || DEFAULT_API_HASH);
       } catch (err) {
         console.error("Failed to load credentials config from vault:", err);
+        // Even on vault error, fall back to defaults so login remains functional
+        setConfigApiId(DEFAULT_API_ID);
+        setConfigApiHash(DEFAULT_API_HASH);
       } finally {
         setCheckingConfig(false);
       }
@@ -273,20 +277,7 @@ export default function AuthPage() {
             </span>
           </Link>
 
-          {!configApiId || !configApiHash ? (
-            <div className="flex gap-3 p-4 rounded-xl border border-red-200 bg-red-50/50 dark:border-red-950 dark:bg-red-950/20 text-red-700 dark:text-red-400 text-left mb-4">
-              <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <h5 className="text-xs font-bold uppercase tracking-wider">Missing API Credentials</h5>
-                <p className="text-xs leading-relaxed mb-2">
-                  You must save your Telegram API credentials in Settings before signing in.
-                </p>
-                <Link to="/settings" className="text-xs font-bold underline hover:text-red-800 dark:hover:text-red-300">
-                  Go to Settings →
-                </Link>
-              </div>
-            </div>
-          ) : null}
+          {/* No missing credentials warning needed — built-in default credentials are always available */}
 
           {error && (
             <div className="flex gap-2 p-3.5 rounded-xl border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/25 text-red-600 dark:text-red-400 text-xs text-left mb-4">
@@ -314,14 +305,14 @@ export default function AuthPage() {
                 placeholder="e.g. +1 555-0199"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                disabled={loading || !configApiId}
+                disabled={loading}
                 className="rounded-xl h-11"
               />
             </div>
 
             <Button
               type="submit"
-              disabled={loading || !configApiId || !phone.trim()}
+              disabled={loading || !phone.trim()}
               className="w-full h-11 rounded-xl bg-brand-500 hover:bg-brand-600 font-semibold shadow-md shadow-brand-500/10"
             >
               {loading ? (
