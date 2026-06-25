@@ -1,6 +1,6 @@
 # TeleDrive 🚀
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Tauri Version](https://img.shields.io/badge/Tauri-v2-orange.svg?style=flat&logo=tauri)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-v19-blue.svg?style=flat&logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind--CSS-v4-38bdf8.svg?style=flat&logo=tailwind-css)](https://tailwindcss.com/)
@@ -244,6 +244,6 @@ We welcome community contributions to expand TeleDrive! Here is the workflow:
 
 ## 📜 License & Disclaimer
 
-TeleDrive is distributed under the terms of the **MIT License**.
+TeleDrive is open-source software distributed under the terms of the **GNU GPL-3.0 License**. See the [LICENSE](file:///Users/sayansenapati/Desktop/Dev/Innovation/teledrive/LICENSE) file for details.
 
 *Disclaimer: This is a community-driven open-source project and is not affiliated, sponsored, or endorsed by Telegram FZ-LLC. Storing large volumes of files on Telegram might be subject to bandwidth quotas, account restrictions, and Terms of Service rules. Use responsibly.*
