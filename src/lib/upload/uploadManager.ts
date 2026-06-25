@@ -19,13 +19,13 @@ export async function processQueue(): Promise<void> {
 
   try {
     const { uploadQueue, updateQueueItem, setFiles } = useFileStore.getState();
-    
+
     const pendingItems = uploadQueue.filter((item) => item.status === "pending");
     const uploadingItems = uploadQueue.filter((item) => item.status === "uploading");
 
     await invoke("log_vault_state", {
       state: `PROCESS_QUEUE: pending=${pendingItems.length} uploading=${uploadingItems.length} total=${uploadQueue.length}`
-    });
+    }).catch(() => {});
 
     // Concurrency limit is 3. If full or nothing is pending, exit.
     if (uploadingItems.length >= 3 || pendingItems.length === 0) {
@@ -33,22 +33,22 @@ export async function processQueue(): Promise<void> {
       return;
     }
 
-    await invoke("log_vault_state", { state: "PROCESS_QUEUE: Fetching channelId from vault..." });
+    await invoke("log_vault_state", { state: "PROCESS_QUEUE: Fetching channelId from vault..." }).catch(() => {});
     let channelId: string | null = null;
     try {
       channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
-      await invoke("log_vault_state", { state: `PROCESS_QUEUE: Fetched channelId = ${channelId}` });
+      await invoke("log_vault_state", { state: `PROCESS_QUEUE: Fetched channelId = ${channelId}` }).catch(() => {});
     } catch (err: any) {
       await invoke("log_vault_state", {
         state: `PROCESS_QUEUE_VAULT_ERR: ${err?.message || JSON.stringify(err)}`
-      });
+      }).catch(() => {});
       isProcessing = false;
       return;
     }
 
     if (!channelId) {
       toast.error("Telegram storage channel is not configured. Please check settings.");
-      await invoke("log_vault_state", { state: "PROCESS_QUEUE: channelId is empty/null" });
+      await invoke("log_vault_state", { state: "PROCESS_QUEUE: channelId is empty/null" }).catch(() => {});
       isProcessing = false;
       return;
     }
@@ -59,7 +59,7 @@ export async function processQueue(): Promise<void> {
 
     await invoke("log_vault_state", {
       state: `PROCESS_QUEUE: Starting ${itemsToStart.length} uploads`
-    });
+    }).catch(() => {});
 
     isProcessing = false; // Allow other calls to trigger if needed
 
@@ -67,26 +67,26 @@ export async function processQueue(): Promise<void> {
     for (const item of itemsToStart) {
       // Immediately set status to uploading to prevent double processing
       updateQueueItem(item.id, { status: "uploading", progress: 0 });
-      
+
       // Run the upload task
       (async () => {
         try {
           let fileSource: string | File;
-          
+
           if (item.file instanceof File) {
             fileSource = item.file;
           } else if (item.file && "path" in item.file && item.file.path) {
             fileSource = item.file.path;
           } else if (item.file && "data" in item.file && item.file.data) {
             // Convert byte array to HTML File object
-            fileSource = new File([item.file.data], item.name, { type: item.file.type });
+            fileSource = new File([item.file.data], item.name, { type: (item.file as any).type });
           } else {
             throw new Error("No valid file reference or path found.");
           }
 
           const currentFolder = useFileStore.getState().currentFolder;
 
-          // Call chunked uploader
+          // --- Phase 1: Upload file bytes to Telegram ---
           const message = await uploadFileToTelegram(
             channelId,
             item.name,
@@ -94,16 +94,22 @@ export async function processQueue(): Promise<void> {
             fileSource,
             (uploaded, total) => {
               const pct = Math.round((uploaded / total) * 100);
-              updateQueueItem(item.id, { progress: pct });
+              // Cap at 95% until indexing succeeds
+              updateQueueItem(item.id, { progress: Math.min(pct, 95) });
             }
           );
 
-          // Success: create a virtual metadata file entry
+          // Build the metadata entry
+          const mimeType =
+            item.file instanceof File
+              ? item.file.type
+              : (item.file as any)?.type || "application/octet-stream";
+
           const newFile: TeleFile = {
             id: item.id,
             name: item.name,
             size: item.size,
-            mime: item.file instanceof File ? item.file.type : (item.file?.type || "application/octet-stream"),
+            mime: mimeType || "application/octet-stream",
             folderPath: currentFolder,
             messageId: message.id,
             channelId,
@@ -112,12 +118,53 @@ export async function processQueue(): Promise<void> {
             trashed: false,
           };
 
-          // Save virtual file metadata to Telegram pinned index and update store
-          const updatedFiles = await addFile(channelId, newFile);
-          setFiles(updatedFiles);
+          // --- Phase 2: Save metadata index to Telegram ---
+          // Retry up to 3 times with exponential back-off for index-save errors
+          // (especially EDIT_MESSAGE_TEMP_RESTRICTED in new channels).
+          let updatedFiles: TeleFile[] | null = null;
+          let lastIndexErr: any = null;
 
-          updateQueueItem(item.id, { status: "done", progress: 100 });
-          toast.success(`"${item.name}" uploaded successfully!`);
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              updatedFiles = await addFile(channelId, newFile);
+              lastIndexErr = null;
+              break;
+            } catch (indexErr: any) {
+              lastIndexErr = indexErr;
+              await invoke("log_vault_state", {
+                state: `INDEX_SAVE_ATTEMPT_${attempt}_ERR: ${indexErr?.message}`
+              }).catch(() => {});
+              if (attempt < 3) {
+                await new Promise((r) => setTimeout(r, 1500 * attempt));
+              }
+            }
+          }
+
+          if (updatedFiles) {
+            // Index saved — full success
+            setFiles(updatedFiles);
+            updateQueueItem(item.id, { status: "done", progress: 100 });
+            toast.success(`"${item.name}" uploaded successfully!`);
+          } else {
+            // File reached Telegram but index could not be saved.
+            // Save to local store at least so it's visible until app restarts.
+            const existingFiles = useFileStore.getState().files;
+            setFiles([...existingFiles.filter((f) => f.id !== newFile.id), newFile]);
+
+            updateQueueItem(item.id, {
+              status: "done",
+              progress: 100,
+              error: "Uploaded to Telegram but index save failed — file may disappear after restart.",
+            });
+
+            await invoke("log_vault_state", {
+              state: `UPLOAD_INDEX_FAIL: ${item.name} — ${lastIndexErr?.message || lastIndexErr}`
+            }).catch(() => {});
+
+            toast.warning(
+              `"${item.name}" uploaded, but saving the file list failed. Try refreshing.`
+            );
+          }
         } catch (err: any) {
           console.error(`Upload error for ${item.name}:`, err);
           await invoke("log_vault_state", {
@@ -127,7 +174,7 @@ export async function processQueue(): Promise<void> {
             status: "error",
             error: err.message || "Upload failed",
           });
-          toast.error(`Failed to upload "${item.name}"`);
+          toast.error(`Failed to upload "${item.name}": ${err.message || "Unknown error"}`);
         } finally {
           // Re-trigger processQueue to pull the next pending items
           processQueue();
