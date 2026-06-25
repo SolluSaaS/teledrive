@@ -584,7 +584,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       <div className="flex flex-wrap items-center justify-between gap-3 py-1.5 shrink-0 select-none">
         {/* Category Filter Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 max-w-full">
-          {["All", "Documents", "Images", "Videos", "Audio", "Archives"].map((filter) => {
+          {["All", "Documents", "Images", "Videos", "Audio"].map((filter) => {
             const isActive = filterType === filter;
             return (
               <button

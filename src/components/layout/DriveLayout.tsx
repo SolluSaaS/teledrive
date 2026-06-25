@@ -249,13 +249,16 @@ export default function DriveLayout() {
   };
 
   const archivedCount = files.filter((f) => f.archived && !f.trashed).length;
+  const starredCount  = files.filter((f) => f.starred && !f.trashed && !f.archived).length;
+  const trashCount    = files.filter((f) => f.trashed).length;
+  const totalCount    = files.filter((f) => !f.trashed && !f.archived).length;
 
   const navItems = [
-    { label: "My Drive", icon: HardDrive, path: "/drive/my-drive" },
-    { label: "Recent", icon: Clock, path: "/drive/recent" },
-    { label: "Starred", icon: Star, path: "/drive/starred" },
-    { label: "Archived", icon: Archive, path: "/drive/archived", badge: archivedCount },
-    { label: "Trash", icon: Trash2, path: "/drive/trash" },
+    { label: "My Drive",  icon: HardDrive, path: "/drive/my-drive",  badge: totalCount },
+    { label: "Recent",   icon: Clock,      path: "/drive/recent" },
+    { label: "Starred",  icon: Star,       path: "/drive/starred",   badge: starredCount },
+    { label: "Archived", icon: Archive,    path: "/drive/archived",  badge: archivedCount },
+    { label: "Trash",    icon: Trash2,     path: "/drive/trash",     badge: trashCount },
   ];
 
   const SidebarContent = () => (
