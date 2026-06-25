@@ -212,10 +212,39 @@ export async function addFile(channelId: string, file: TeleFile): Promise<TeleFi
 /** Removes a file entry from the index by id. */
 export async function removeFile(channelId: string, fileId: string): Promise<TeleFile[]> {
   const files = await loadIndex(channelId);
+  const file = files.find((f) => f.id === fileId);
   const updatedFiles = files.filter((f) => f.id !== fileId);
   await saveIndex(channelId, updatedFiles);
+
+  // Also delete the actual Telegram message if this was a real uploaded file
+  // (folders have messageId=0 and live only in the index)
+  if (file && file.messageId && file.messageId !== 0) {
+    await deleteTelegramMessage(channelId, file.messageId).catch((err) => {
+      console.warn(
+        `[metadataStore] Could not delete Telegram message ${file.messageId} (non-fatal):`,
+        err?.message || err
+      );
+    });
+  }
+
   return updatedFiles;
 }
+
+/**
+ * Deletes a specific message from the Telegram storage channel.
+ * Used when permanently deleting uploaded files — removes the file data from Telegram.
+ * Non-fatal if the message was already deleted.
+ */
+export async function deleteTelegramMessage(
+  channelId: string,
+  messageId: number
+): Promise<void> {
+  if (!messageId || messageId === 0) return;
+  const client = getClient();
+  const peer = await resolveChannelPeer(channelId);
+  await client.deleteMessages(peer, [messageId], { revoke: true });
+}
+
 
 /**
  * Updates a file entry in the index.

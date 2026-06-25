@@ -1,4 +1,3 @@
-import { Api } from "telegram";
 import { getClient } from "./client";
 import { ensureStorageChannel } from "./channelManager";
 import { loadIndex, saveIndex } from "../storage/metadataStore";

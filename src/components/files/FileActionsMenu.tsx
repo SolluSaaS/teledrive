@@ -26,6 +26,8 @@ interface FileActionsMenuProps {
   onStarToggle: (file: TeleFile) => void;
   onTrash: (file: TeleFile) => void;
   onMoveTo?: (file: TeleFile) => void;
+  /** Called when user clicks "Delete Permanently" in trash mode */
+  onDeletePermanently?: (file: TeleFile) => void;
 }
 
 export function FileActionsMenu({
@@ -36,6 +38,7 @@ export function FileActionsMenu({
   onStarToggle,
   onTrash,
   onMoveTo,
+  onDeletePermanently,
 }: FileActionsMenuProps) {
   const isDirectory = file.mime === "inode/directory" || file.mime === "application/x-directory";
 
@@ -53,7 +56,7 @@ export function FileActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-48 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md"
+        className="w-52 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md"
         onClick={(e) => e.stopPropagation()}
       >
         {!isDirectory && !file.trashed && (
@@ -106,13 +109,29 @@ export function FileActionsMenu({
         )}
 
         {file.trashed ? (
-          <DropdownMenuItem
-            onClick={() => onTrash(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <RotateCcw className="h-4 w-4" />
-            <span>Restore</span>
-          </DropdownMenuItem>
+          <>
+            {/* --- Restore option --- */}
+            <DropdownMenuItem
+              onClick={() => onTrash(file)}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Restore</span>
+            </DropdownMenuItem>
+            {/* --- Delete permanently option (only visible in trash) --- */}
+            {onDeletePermanently && (
+              <>
+                <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                <DropdownMenuItem
+                  onClick={() => onDeletePermanently(file)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 focus:bg-red-50 dark:focus:bg-red-950/20 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>Delete Permanently</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </>
         ) : (
           <>
             <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />

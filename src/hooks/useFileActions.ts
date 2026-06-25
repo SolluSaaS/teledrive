@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getSecret, VAULT_KEY_CHANNEL_ID } from "../lib/secure/vault";
-import { addFile, removeFile, updateFile } from "../lib/storage/metadataStore";
+import { addFile, removeFile, updateFile, deleteTelegramMessage } from "../lib/storage/metadataStore";
+import { loadIndex, saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { TeleFile } from "../lib/types";
 import { toast } from "sonner";
@@ -109,6 +110,11 @@ export function useFileActions() {
     }
   };
 
+  /**
+   * Permanently deletes a single file:
+   * 1. Removes it from the metadata index
+   * 2. Deletes the actual Telegram message (the file data) — handled inside removeFile
+   */
   const deletePermanently = async (fileId: string) => {
     setIsOperating(true);
     try {
@@ -124,6 +130,64 @@ export function useFileActions() {
     }
   };
 
+  /**
+   * Empties the trash: permanently deletes ALL trashed items.
+   *
+   * Strategy:
+   * 1. Load the current index from Telegram
+   * 2. Separate trashed vs. active files
+   * 3. Delete all trashed Telegram messages in parallel (best-effort)
+   * 4. Save the cleaned-up index (active files only)
+   * 5. Update the local store
+   *
+   * This is more efficient than calling removeFile() N times (which would
+   * each trigger a full loadIndex+saveIndex round-trip).
+   */
+  const emptyTrash = async () => {
+    setIsOperating(true);
+    try {
+      const channelId = await getChannelId();
+      const allFiles = await loadIndex(channelId);
+
+      const trashed = allFiles.filter((f) => f.trashed);
+      const active = allFiles.filter((f) => !f.trashed);
+
+      if (trashed.length === 0) {
+        toast.info("Trash is already empty");
+        return;
+      }
+
+      // Delete Telegram messages in parallel (folders have messageId=0 — skip)
+      const deletionPromises = trashed
+        .filter((f) => f.messageId && f.messageId !== 0)
+        .map((f) =>
+          deleteTelegramMessage(channelId, f.messageId).catch((err) => {
+            console.warn(
+              `[emptyTrash] Could not delete message ${f.messageId} for "${f.name}":`,
+              err?.message || err
+            );
+          })
+        );
+
+      await Promise.allSettled(deletionPromises);
+
+      // Save the index without the trashed files
+      await saveIndex(channelId, active);
+      setFiles(active);
+
+      toast.success(
+        trashed.length === 1
+          ? "1 item deleted permanently"
+          : `${trashed.length} items deleted permanently`
+      );
+    } catch (err: any) {
+      console.error("Failed to empty trash:", err);
+      toast.error(err.message || "Failed to empty trash");
+    } finally {
+      setIsOperating(false);
+    }
+  };
+
   return {
     isOperating,
     createFolder,
@@ -132,5 +196,6 @@ export function useFileActions() {
     moveToTrash,
     restoreFromTrash,
     deletePermanently,
+    emptyTrash,
   };
 }

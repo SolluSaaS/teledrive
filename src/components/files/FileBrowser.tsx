@@ -91,6 +91,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     moveToTrash,
     restoreFromTrash,
     deletePermanently,
+    emptyTrash,
+    isOperating,
   } = useFileActions();
 
   const isMobile = useIsMobile();
@@ -103,6 +105,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<TeleFile | null>(null);
   const [newFileName, setNewFileName] = useState("");
+  const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TeleFile | null>(null);
 
   // Update current folder path in store on mount/change
   useEffect(() => {
@@ -572,14 +576,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                if (window.confirm("Are you sure you want to permanently delete all items in the trash?")) {
-                  for (const file of displayFiles) {
-                    await deletePermanently(file.id);
-                  }
-                  clearSelection();
-                }
-              }}
+              onClick={() => setEmptyTrashDialogOpen(true)}
               className="h-8.5 rounded-xl text-xs border-red-200 text-red-600 dark:border-red-950 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 font-semibold"
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
@@ -737,6 +734,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             onRename={openRenameDialog}
                             onStarToggle={toggleStar}
                             onTrash={moveToTrash}
+                            onDeletePermanently={setDeleteTarget}
                           />
                         </div>
                       </div>
@@ -765,6 +763,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onRename={openRenameDialog}
                       onStarToggle={toggleStar}
                       onTrash={moveToTrash}
+                      onDeletePermanently={setDeleteTarget}
                     >
                       <div
                         onClick={(e) => handleItemClick(e, file)}
@@ -805,6 +804,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                               onRename={openRenameDialog}
                               onStarToggle={toggleStar}
                               onTrash={moveToTrash}
+                              onDeletePermanently={setDeleteTarget}
                             />
                           </div>
                         </div>
@@ -857,6 +857,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     onRename={openRenameDialog}
                     onStarToggle={toggleStar}
                     onTrash={moveToTrash}
+                    onDeletePermanently={setDeleteTarget}
                   >
                     <tr
                       onClick={(e) => handleItemClick(e, file)}
@@ -903,6 +904,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           onRename={openRenameDialog}
                           onStarToggle={toggleStar}
                           onTrash={moveToTrash}
+                          onDeletePermanently={setDeleteTarget}
                         />
                       </td>
                     </tr>
@@ -1133,12 +1135,112 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       <span>Move to Trash</span>
                     </button>
                   )}
+                  {mobileContextFile.trashed && (
+                    <button
+                      onClick={() => {
+                        const f = mobileContextFile;
+                        setMobileContextFile(null);
+                        setDeleteTarget(f);
+                      }}
+                      className="flex items-center gap-3 px-3 py-3 text-sm rounded-xl hover:bg-red-50 dark:hover:bg-red-950/20 text-left font-semibold text-red-600 dark:text-red-400 border-0 cursor-pointer w-full bg-transparent"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>Delete Permanently</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
           </SheetContent>
         </Sheet>
       )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Empty Trash confirmation dialog (replaces window.confirm)           */}
+      {/* ------------------------------------------------------------------ */}
+      <Dialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
+        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-red-500" />
+              Empty Trash
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+            This will permanently delete <strong>{displayFiles.length} item{displayFiles.length !== 1 ? "s" : ""}</strong> from
+            your Telegram storage channel. This action <strong>cannot be undone</strong>.
+          </p>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs font-semibold"
+              onClick={() => setEmptyTrashDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isOperating}
+              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={async () => {
+                setEmptyTrashDialogOpen(false);
+                await emptyTrash();
+                clearSelection();
+              }}
+            >
+              {isOperating ? "Deleting…" : "Delete All Permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Individual item permanent delete confirmation dialog               */}
+      {/* ------------------------------------------------------------------ */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-red-500" />
+              Delete Permanently
+            </DialogTitle>
+          </DialogHeader>
+          {deleteTarget && (
+            <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+              Are you sure you want to permanently delete <strong>{deleteTarget.name}</strong>?
+              {deleteTarget.mime !== "inode/directory" && deleteTarget.mime !== "application/x-directory" && (
+                <> This will delete the actual file from your Telegram storage channel.</>
+              )}
+              This action <strong>cannot be undone</strong>.
+            </p>
+          )}
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs font-semibold"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isOperating}
+              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={async () => {
+                if (deleteTarget) {
+                  const targetId = deleteTarget.id;
+                  setDeleteTarget(null);
+                  await deletePermanently(targetId);
+                }
+              }}
+            >
+              {isOperating ? "Deleting…" : "Delete Permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
