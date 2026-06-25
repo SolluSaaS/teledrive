@@ -185,7 +185,7 @@ export default function SettingsPage() {
         {/* Settings Panel Content Area */}
         {(!isMobile || mobileShowContent) && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background/50 backdrop-blur-md">
-            <div className="max-w-2xl animate-fade-in">
+            <div key={activeSection} className="max-w-2xl animate-slide-up-fade">
               <ActiveComponent />
             </div>
           </div>

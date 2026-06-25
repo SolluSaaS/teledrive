@@ -10,6 +10,7 @@ import {
   Eye,
   Download,
   Edit2,
+  Pencil,
   FolderInput,
   Star,
   Trash2,
@@ -18,12 +19,14 @@ import {
   ArchiveRestore,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
+import { isEditableFile } from "@/lib/files/editableTypes";
 
 interface FileContextMenuProps {
   file: TeleFile;
   children: React.ReactNode;
   onPreview: (file: TeleFile) => void;
   onDownload: (file: TeleFile) => void;
+  onEdit?: (file: TeleFile) => void;
   onRename: (file: TeleFile) => void;
   onStarToggle: (file: TeleFile) => void;
   onTrash: (file: TeleFile) => void;
@@ -38,6 +41,7 @@ export function FileContextMenu({
   children,
   onPreview,
   onDownload,
+  onEdit,
   onRename,
   onStarToggle,
   onTrash,
@@ -59,6 +63,15 @@ export function FileContextMenu({
           >
             <Eye className="h-4 w-4" />
             <span>Preview</span>
+          </ContextMenuItem>
+        )}
+        {!isDirectory && !file.trashed && !file.archived && onEdit && isEditableFile(file) && (
+          <ContextMenuItem
+            onClick={() => onEdit(file)}
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+          >
+            <Pencil className="h-4 w-4" />
+            <span>Edit</span>
           </ContextMenuItem>
         )}
         {!isDirectory && !file.trashed && !file.archived && (

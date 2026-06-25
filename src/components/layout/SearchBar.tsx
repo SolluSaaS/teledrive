@@ -94,7 +94,9 @@ export default function SearchBar() {
                 return (
                   <div
                     key={file.id}
-                    onMouseDown={() => handleQuickResultClick(file)} // use onMouseDown to fire before input blur closes dropdown
+                    onMouseDown={(e) => e.preventDefault()} // prevent input blur from unmounting suggestions prematurely
+                    onClick={() => handleQuickResultClick(file)}
+                    onDoubleClick={() => handleQuickResultClick(file)}
                     className="flex items-center gap-3 px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors"
                   >
                     <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent shrink-0" />

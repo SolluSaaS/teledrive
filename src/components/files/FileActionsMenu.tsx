@@ -11,6 +11,7 @@ import {
   Eye,
   Download,
   Edit2,
+  Pencil,
   FolderInput,
   Star,
   Trash2,
@@ -20,11 +21,13 @@ import {
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { isEditableFile } from "@/lib/files/editableTypes";
 
 interface FileActionsMenuProps {
   file: TeleFile;
   onPreview: (file: TeleFile) => void;
   onDownload: (file: TeleFile) => void;
+  onEdit?: (file: TeleFile) => void;
   onRename: (file: TeleFile) => void;
   onStarToggle: (file: TeleFile) => void;
   onTrash: (file: TeleFile) => void;
@@ -39,6 +42,7 @@ export function FileActionsMenu({
   file,
   onPreview,
   onDownload,
+  onEdit,
   onRename,
   onStarToggle,
   onTrash,
@@ -66,7 +70,7 @@ export function FileActionsMenu({
         className="w-48 rounded-xl p-1.5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-xl shadow-slate-100/5 dark:shadow-black/30 ring-0"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Group 1: Retrieve Actions (Preview & Download) */}
+        {/* Group 1: Retrieve Actions (Preview, Edit & Download) */}
         {!isDirectory && !file.trashed && !file.archived && (
           <>
             <DropdownMenuItem
@@ -76,6 +80,15 @@ export function FileActionsMenu({
               <Eye className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
               <span>Preview</span>
             </DropdownMenuItem>
+            {onEdit && isEditableFile(file) && (
+              <DropdownMenuItem
+                onClick={() => onEdit(file)}
+                className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+              >
+                <Pencil className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+                <span>Edit</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onClick={() => onDownload(file)}
               className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"

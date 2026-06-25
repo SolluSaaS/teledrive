@@ -32,15 +32,21 @@ function LoadingFallback() {
 // Splash Screen Loader
 function SplashLoader({ status }: { status: string }) {
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-4">
-      <img
-        src="/teledrive.png"
-        alt="TeleDrive Logo"
-        className="h-16 w-16 object-contain animate-pulse shrink-0 rounded-2xl shadow-md"
-      />
-      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-medium">
-        <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
-        <span className="text-sm">{status}</span>
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-4 relative overflow-hidden">
+      {/* Decorative ambient background blobs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/8 dark:bg-brand-500/12 blur-[130px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/8 dark:bg-indigo-500/12 blur-[130px] pointer-events-none" />
+      
+      <div className="relative flex flex-col items-center gap-4">
+        <img
+          src="/teledrive.png"
+          alt="TeleDrive Logo"
+          className="h-16 w-16 object-contain animate-pulse shrink-0 rounded-2xl shadow-md"
+        />
+        <div className="flex items-center gap-2 text-slate-650 dark:text-slate-350 font-semibold bg-white/70 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/50 px-4.5 py-2 rounded-full shadow-sm">
+          <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
+          <span className="text-xs">{status}</span>
+        </div>
       </div>
     </div>
   );

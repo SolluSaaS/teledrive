@@ -33,6 +33,7 @@ export default function DriveLayout() {
   const phoneNumber = useAuthStore((state) => state.phoneNumber);
   
   const [previewFile, setPreviewFile] = useState<TeleFile | null>(null);
+  const [previewInitialEditMode, setPreviewInitialEditMode] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -142,6 +143,16 @@ export default function DriveLayout() {
     const handlePreviewTrigger = (e: Event) => {
       const file = (e as CustomEvent).detail as TeleFile;
       if (file) {
+        setPreviewInitialEditMode(false);
+        setPreviewFile(file);
+        window.history.pushState({ modal: "preview" }, "");
+      }
+    };
+
+    const handleEditTrigger = (e: Event) => {
+      const file = (e as CustomEvent).detail as TeleFile;
+      if (file) {
+        setPreviewInitialEditMode(true);
         setPreviewFile(file);
         window.history.pushState({ modal: "preview" }, "");
       }
@@ -159,6 +170,7 @@ export default function DriveLayout() {
     window.addEventListener("teledrive-trigger-folder-upload", handleFolderUploadTrigger);
     window.addEventListener("teledrive-download-file", handleDownloadTrigger);
     window.addEventListener("teledrive-preview-file", handlePreviewTrigger);
+    window.addEventListener("teledrive-edit-file", handleEditTrigger);
     window.addEventListener("teledrive-refresh-files", handleRefreshFiles);
     
     return () => {
@@ -166,6 +178,7 @@ export default function DriveLayout() {
       window.removeEventListener("teledrive-trigger-folder-upload", handleFolderUploadTrigger);
       window.removeEventListener("teledrive-download-file", handleDownloadTrigger);
       window.removeEventListener("teledrive-preview-file", handlePreviewTrigger);
+      window.removeEventListener("teledrive-edit-file", handleEditTrigger);
       window.removeEventListener("teledrive-refresh-files", handleRefreshFiles);
     };
   }, []);
@@ -313,8 +326,12 @@ export default function DriveLayout() {
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">used</span>
           </div>
           
-          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-block select-none mt-1">
-            Unlimited Storage
+          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-flex items-center gap-1.5 select-none mt-1">
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+            </span>
+            <span>Unlimited Storage</span>
           </div>
         </div>
       </div>
@@ -345,7 +362,7 @@ export default function DriveLayout() {
       )}
       
       {/* Topbar */}
-      <header className="flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
+      <header className="relative z-40 flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
           {isMobile && (
             <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -450,7 +467,9 @@ export default function DriveLayout() {
               <Loader2 className={cn("h-4.5 w-4.5 text-brand-500", isRefreshing && "animate-spin")} />
             </div>
           )}
-          <Outlet />
+          <div key={location.pathname} className="animate-slide-up-fade min-h-full w-full">
+            <Outlet />
+          </div>
         </main>
       </div>
 
@@ -490,8 +509,10 @@ export default function DriveLayout() {
       )}
       <FilePreviewModal
         file={previewFile}
+        initialEditMode={previewInitialEditMode}
         onClose={() => {
           setPreviewFile(null);
+          setPreviewInitialEditMode(false);
           if (window.history.state?.modal === "preview") {
             window.history.back();
           }

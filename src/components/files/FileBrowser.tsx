@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { fuzzySearch } from "@/lib/search/searchEngine";
 import { getFileCategory } from "@/lib/files/fileUtils";
+import { isEditableFile } from "@/lib/files/editableTypes";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -329,6 +330,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     window.dispatchEvent(event);
   };
 
+  const handleEdit = (file: TeleFile) => {
+    const event = new CustomEvent("teledrive-edit-file", { detail: file });
+    window.dispatchEvent(event);
+  };
+
   const handleDownload = (file: TeleFile) => {
     const event = new CustomEvent("teledrive-download-file", { detail: file });
     window.dispatchEvent(event);
@@ -497,7 +503,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     }
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto animate-fade-in">
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto animate-slide-up-fade">
         <div className="relative mb-6">
           <div className="absolute inset-0 bg-brand-100/40 dark:bg-brand-950/20 blur-xl rounded-full scale-150 animate-pulse" />
           <Icon className="relative h-16 w-16 text-brand-500/80 stroke-[1.5]" />
@@ -740,13 +746,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 Folders
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
-                {folders.map((folder) => {
+                {folders.map((folder, index) => {
                   const isSelected = selectedIds.includes(folder.id);
                   return (
                     <FileContextMenu
                       key={folder.id}
                       file={folder}
                       onPreview={toastPreview}
+                      onEdit={handleEdit}
                       onDownload={handleDownload}
                       onRename={openRenameDialog}
                       onStarToggle={toggleStar}
@@ -761,8 +768,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchStart={() => handleTouchStartItem(folder)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
+                        style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none",
+                          "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none animate-slide-up-fade",
                           isSelected
                             ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
                             : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40"
@@ -778,6 +786,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           <FileActionsMenu
                             file={folder}
                             onPreview={toastPreview}
+                            onEdit={handleEdit}
                             onDownload={handleDownload}
                             onRename={openRenameDialog}
                             onStarToggle={toggleStar}
@@ -802,13 +811,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 Files
               </span>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {regularFiles.map((file) => {
+                {regularFiles.map((file, index) => {
                   const isSelected = selectedIds.includes(file.id);
                   return (
                     <FileContextMenu
                       key={file.id}
                       file={file}
                       onPreview={toastPreview}
+                      onEdit={handleEdit}
                       onDownload={handleDownload}
                       onRename={openRenameDialog}
                       onStarToggle={toggleStar}
@@ -823,8 +833,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchStart={() => handleTouchStartItem(file)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
+                        style={{ animationDelay: `${Math.min(folders.length + index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 hover:shadow-md select-none h-44",
+                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 hover:shadow-md select-none h-44 animate-slide-up-fade",
                           isSelected
                             ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
                             : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700"
@@ -849,17 +860,18 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             </p>
                           </div>
                           <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <FileActionsMenu
-                              file={file}
-                              onPreview={toastPreview}
-                              onDownload={handleDownload}
-                              onRename={openRenameDialog}
-                              onStarToggle={toggleStar}
-                              onTrash={moveToTrash}
-                              onDeletePermanently={setDeleteTarget}
-                              onArchive={archiveFile}
-                              onUnarchive={unarchiveFile}
-                            />
+                          <FileActionsMenu
+                            file={file}
+                            onPreview={toastPreview}
+                            onEdit={handleEdit}
+                            onDownload={handleDownload}
+                            onRename={openRenameDialog}
+                            onStarToggle={toggleStar}
+                            onTrash={moveToTrash}
+                            onDeletePermanently={setDeleteTarget}
+                            onArchive={archiveFile}
+                            onUnarchive={unarchiveFile}
+                          />
                           </div>
                         </div>
                       </div>
@@ -898,7 +910,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               </tr>
             </thead>
             <tbody>
-              {displayFiles.map((file) => {
+              {displayFiles.map((file, index) => {
                 const isSelected = selectedIds.includes(file.id);
                 const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
                 
@@ -907,6 +919,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     key={file.id}
                     file={file}
                     onPreview={toastPreview}
+                    onEdit={handleEdit}
                     onDownload={handleDownload}
                     onRename={openRenameDialog}
                     onStarToggle={toggleStar}
@@ -921,8 +934,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onTouchStart={() => handleTouchStartItem(file)}
                       onTouchEnd={handleTouchEndItem}
                       onTouchMove={handleTouchEndItem}
+                      style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                       className={cn(
-                        "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150",
+                        "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150 animate-slide-up-fade",
                         isSelected && "bg-brand-50/40 dark:bg-brand-950/15"
                       )}
                     >
@@ -956,6 +970,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         <FileActionsMenu
                           file={file}
                           onPreview={toastPreview}
+                          onEdit={handleEdit}
                           onDownload={handleDownload}
                           onRename={openRenameDialog}
                           onStarToggle={toggleStar}
@@ -1133,6 +1148,19 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     >
                       <Eye className="h-4 w-4 text-slate-500" />
                       <span>Preview</span>
+                    </button>
+                  )}
+                  {mobileContextFile.mime !== "inode/directory" && mobileContextFile.mime !== "application/x-directory" && !mobileContextFile.trashed && isEditableFile(mobileContextFile) && (
+                    <button
+                      onClick={() => {
+                        const f = mobileContextFile;
+                        setMobileContextFile(null);
+                        handleEdit(f);
+                      }}
+                      className="flex items-center gap-3 px-3 py-3 text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-700 dark:text-slate-200 border-0 cursor-pointer w-full bg-transparent"
+                    >
+                      <Edit2 className="h-4 w-4 text-slate-500" />
+                      <span>Edit</span>
                     </button>
                   )}
                   {mobileContextFile.mime !== "inode/directory" && mobileContextFile.mime !== "application/x-directory" && !mobileContextFile.trashed && (

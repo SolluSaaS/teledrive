@@ -338,7 +338,7 @@ export default function AuthPage() {
 
         {/* STEP 1: Phone number input */}
         {step === "phone" && (
-          <form onSubmit={handleSendCode} className="space-y-5 animate-fade-in">
+          <form onSubmit={handleSendCode} className="space-y-5 animate-slide-up-fade">
             <div className="space-y-1.5">
               <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Sign in with Telegram</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -378,7 +378,7 @@ export default function AuthPage() {
 
         {/* STEP 2: OTP verification code */}
         {step === "otp" && (
-          <form onSubmit={handleVerifyOTP} className="space-y-6 animate-fade-in">
+          <form onSubmit={handleVerifyOTP} className="space-y-6 animate-slide-up-fade">
             <div className="space-y-1.5">
               <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Enter the code</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -437,7 +437,7 @@ export default function AuthPage() {
 
         {/* STEP 3: 2FA Cloud password */}
         {step === "password" && (
-          <form onSubmit={handleVerifyPassword} className="space-y-5 animate-fade-in">
+          <form onSubmit={handleVerifyPassword} className="space-y-5 animate-slide-up-fade">
             <div className="space-y-1.5">
               <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Two-Factor Authentication</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -501,7 +501,7 @@ export default function AuthPage() {
 
         {/* STEP 4: Bootstrapping TeleDrive */}
         {step === "bootstrap" && (
-          <div className="space-y-6 py-4 text-center animate-fade-in">
+          <div className="space-y-6 py-4 text-center animate-slide-up-fade">
             <div className="space-y-2">
               <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">
                 Setting up TeleDrive
