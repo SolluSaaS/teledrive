@@ -123,6 +123,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     if (isDir) return false; // Hide folders when a media filter is active
 
     const category = getFileCategory(file.name, file.mime);
+    console.log(`[Teledrive Debug] matchFilter: file="${file.name}" mime="${file.mime}" category="${category}" activeFilter="${filter}" match=${category === filter}`);
     return category === filter;
   };
 
