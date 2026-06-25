@@ -90,7 +90,7 @@ export default function AboutSection() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleOpenLink("https://github.com/sayansenapati/teledrive")}
+            onClick={() => handleOpenLink("https://github.com/senapati484/teledrive")}
             className="rounded-xl text-xs font-bold gap-2 border-slate-200 dark:border-slate-800 cursor-pointer h-9 px-4"
           >
             <GithubIcon className="h-4 w-4" />
@@ -99,7 +99,7 @@ export default function AboutSection() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleOpenLink("https://github.com/sayansenapati/teledrive/issues")}
+            onClick={() => handleOpenLink("https://github.com/senapati484/teledrive/issues")}
             className="rounded-xl text-xs font-bold gap-2 border-slate-200 dark:border-slate-800 cursor-pointer h-9 px-4"
           >
             <Bug className="h-4 w-4 text-slate-500" />
