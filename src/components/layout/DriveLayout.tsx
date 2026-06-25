@@ -262,7 +262,7 @@ export default function DriveLayout() {
   ];
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-900/10">
+    <div className="flex flex-col h-full bg-slate-50/20 dark:bg-slate-900/5 select-none">
       {/* Navigation items */}
       <nav className="flex-1 px-3 py-4 space-y-1.5">
         {navItems.map((item) => {
@@ -275,16 +275,23 @@ export default function DriveLayout() {
               key={item.label}
               to={item.path}
               onClick={() => isMobile && setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 ${
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative group cursor-pointer ${
                 isActive
-                  ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 text-brand-600 dark:text-brand-400 shadow-sm"
-                  : "text-muted-foreground hover:bg-slate-100/80 dark:hover:bg-slate-900/50 hover:text-foreground border border-transparent"
+                  ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
+                  : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border border-transparent hover:translate-x-0.5"
               }`}
             >
-              <Icon className="h-4.5 w-4.5 shrink-0" />
+              {isActive && (
+                <div className="absolute left-0 top-2.5 bottom-2.5 w-1 bg-brand-500 rounded-r-full shadow-[0_0_8px_rgba(26,115,232,0.6)]" />
+              )}
+              <Icon className={`h-4.5 w-4.5 shrink-0 transition-transform duration-200 ${isActive ? "text-brand-500 scale-105" : "text-muted-foreground group-hover:text-foreground"}`} />
               <span className="flex-1">{item.label}</span>
               {(item as any).badge > 0 && (
-                <span className="ml-auto text-[10px] font-bold bg-brand-100 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800/50 rounded-full px-2 py-0.5 min-w-[20px] text-center">
+                <span className={`ml-auto text-[10px] font-extrabold rounded-full px-2 py-0.5 min-w-[20px] text-center transition-colors border ${
+                  isActive
+                    ? "bg-brand-500/10 text-brand-600 border-brand-500/20 dark:bg-brand-500/20 dark:text-brand-400 dark:border-brand-500/30"
+                    : "bg-slate-100 dark:bg-slate-800 text-muted-foreground border-slate-200/50 dark:border-slate-800/50"
+                }`}>
                   {(item as any).badge}
                 </span>
               )}
@@ -294,16 +301,24 @@ export default function DriveLayout() {
       </nav>
 
       {/* Storage panel wrapped in a beautiful card matching the settings design */}
-      <div className="mx-3 mb-4 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/30 shadow-sm space-y-3 select-none">
-        <div className="flex items-center gap-2 text-xs font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider">
+      <div className="mx-3.5 mb-4 p-4 border border-slate-200/60 dark:border-slate-800/80 rounded-2xl bg-white/70 dark:bg-slate-900/30 shadow-xs space-y-3.5 select-none relative overflow-hidden backdrop-blur-md">
+        <div className="flex items-center gap-2 text-xs font-extrabold text-slate-550 dark:text-slate-400 uppercase tracking-wider">
           <Database className="h-4 w-4 text-brand-500" />
           <span>Storage</span>
         </div>
-        <div className="space-y-1.5">
-          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
-            {formattedUsedSize} <span className="text-xs font-normal text-muted-foreground">used</span>
+        
+        <div className="space-y-2">
+          <div className="text-sm font-extrabold text-slate-850 dark:text-slate-200 flex items-baseline gap-1">
+            <span>{formattedUsedSize}</span>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">used</span>
           </div>
-          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800/40 rounded-full px-2.5 py-0.5 inline-block select-none">
+          
+          {/* Custom progress bar */}
+          <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-850 rounded-full overflow-hidden relative">
+            <div className="absolute top-0 bottom-0 left-0 w-[35%] bg-gradient-to-r from-brand-500 to-indigo-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)] animate-pulse" />
+          </div>
+          
+          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-block select-none">
             Unlimited Storage
           </div>
         </div>
@@ -321,7 +336,7 @@ export default function DriveLayout() {
     >
       {/* Drag & Drop full screen overlay */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/70 dark:bg-slate-950/75 backdrop-blur-md border-4 border-dashed border-brand-500 m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-200 select-none pointer-events-none">
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/75 dark:bg-slate-950/80 backdrop-blur-lg border-4 border-dashed border-brand-500/80 m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-300 select-none pointer-events-none">
           <div className="flex flex-col items-center gap-4 text-brand-600 dark:text-brand-400">
             <div className="p-6 rounded-full bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 animate-bounce">
               <svg className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -335,12 +350,12 @@ export default function DriveLayout() {
       )}
       
       {/* Topbar */}
-      <header className="flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
           {isMobile && (
             <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-muted">
+                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-muted cursor-pointer">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
@@ -359,13 +374,16 @@ export default function DriveLayout() {
           )}
 
           {/* Logo / Title */}
-          <Link to="/drive/my-drive" className="flex items-center gap-2">
-            <img
-              src="/teledrive.png"
-              alt="TeleDrive Logo"
-              className="h-7 w-7 object-contain rounded-lg shadow-sm shrink-0"
-            />
-            <span className="hidden sm:inline-block text-lg font-bold tracking-tight text-slate-800 dark:text-slate-200">
+          <Link to="/drive/my-drive" className="flex items-center gap-2.5 group">
+            <div className="relative">
+              <div className="absolute inset-0 bg-brand-500/25 blur-xs rounded-lg group-hover:bg-brand-500/35 transition-all duration-300" />
+              <img
+                src="/teledrive.png"
+                alt="TeleDrive Logo"
+                className="relative h-7 w-7 object-contain rounded-lg shadow-sm shrink-0 transition-transform duration-300 group-hover:scale-105"
+              />
+            </div>
+            <span className="hidden sm:inline-block text-lg font-extrabold tracking-tight text-slate-800 dark:text-slate-200">
               TeleDrive
             </span>
           </Link>
@@ -382,14 +400,14 @@ export default function DriveLayout() {
             variant="ghost"
             size="icon"
             onClick={() => navigate("/settings")}
-            className="h-10 w-10 rounded-full hover:bg-muted hidden md:flex"
+            className="h-10 w-10 rounded-full hover:bg-muted hidden md:flex cursor-pointer"
             title="Settings"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-5 w-5 text-slate-550 dark:text-slate-400" />
           </Button>
 
           <Avatar className="h-9 w-9 border cursor-pointer hover:opacity-90 transition-opacity" onClick={() => navigate("/settings")}>
-            <AvatarFallback className="bg-brand-500 text-white font-bold text-xs select-none">
+            <AvatarFallback className="bg-gradient-to-tr from-brand-500 to-indigo-500 text-white font-bold text-xs select-none">
               {getInitials(phoneNumber)}
             </AvatarFallback>
           </Avatar>

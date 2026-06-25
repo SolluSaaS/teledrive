@@ -583,7 +583,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       {/* Filters and Sorting Sub-Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 py-1.5 shrink-0 select-none">
         {/* Category Filter Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 max-w-full">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 max-w-full">
           {["All", "Documents", "Images", "Videos", "Audio"].map((filter) => {
             const isActive = filterType === filter;
             return (
@@ -592,10 +592,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 type="button"
                 onClick={() => setFilterType(filter)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer whitespace-nowrap duration-150",
+                  "px-3.5 py-1.5 text-xs font-bold rounded-full border transition-all duration-200 cursor-pointer whitespace-nowrap active:scale-95",
                   isActive
-                    ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-sm"
-                    : "bg-slate-100/80 dark:bg-slate-900/50 border-transparent text-muted-foreground hover:bg-slate-200/50 dark:hover:bg-slate-800/80 hover:text-foreground"
+                    ? "bg-brand-500 text-white border-brand-500 shadow-xs dark:bg-brand-500/20 dark:text-brand-400 dark:border-brand-500/30"
+                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-muted-foreground hover:border-slate-300 dark:hover:border-slate-700 hover:text-foreground hover:shadow-xs"
                 )}
               >
                 {filter}
@@ -695,10 +695,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
                         className={cn(
-                          "group relative flex items-center justify-between p-3.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-200 cursor-pointer hover:shadow-sm select-none",
+                          "group relative flex items-center justify-between p-3.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none",
                           isSelected
-                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-500 dark:bg-brand-950/20 ring-1 ring-brand-500"
-                            : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
+                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40"
                         )}
                       >
                         <div className="flex items-center gap-3 min-w-0 pr-6">
@@ -757,10 +757,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
                         className={cn(
-                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-200 cursor-pointer overflow-hidden text-left hover:shadow-md select-none h-44",
+                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 hover:shadow-md select-none h-44",
                           isSelected
-                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-500 dark:bg-brand-950/20 ring-1 ring-brand-500"
-                            : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
+                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700"
                         )}
                       >
                         {/* Upper icon/preview box */}
@@ -909,11 +909,12 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
       {/* Floating Bulk Action Bar */}
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-4 bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-5 py-2.5 rounded-full shadow-2xl border border-slate-800 dark:border-slate-200 animate-slide-up">
-          <span className="text-xs font-bold whitespace-nowrap">
-            {selectedIds.length} Selected
-          </span>
-          <div className="h-4 w-px bg-slate-700 dark:bg-slate-300" />
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-4 bg-slate-950/90 text-white dark:bg-slate-900/90 px-5 py-2.5 rounded-full shadow-2xl border border-slate-800 dark:border-slate-800/60 backdrop-blur-md animate-slide-up select-none">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-extrabold bg-brand-500 px-2.5 py-0.5 rounded-full text-white">{selectedIds.length}</span>
+            <span className="text-xs font-extrabold whitespace-nowrap">Selected</span>
+          </div>
+          <div className="h-4 w-px bg-slate-700 dark:bg-slate-700" />
           
           <div className="flex items-center gap-1">
             {mode === "trash" ? (
@@ -922,7 +923,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   variant="ghost"
                   size="icon"
                   onClick={handleBulkRestore}
-                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900"
+                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-800 text-white cursor-pointer"
                   title="Restore selected"
                 >
                   <RotateCcw className="h-4 w-4" />
@@ -931,7 +932,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   variant="ghost"
                   size="icon"
                   onClick={handleBulkDelete}
-                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-100 text-red-400"
+                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-800 text-red-400 cursor-pointer"
                   title="Delete permanently"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -943,7 +944,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   variant="ghost"
                   size="icon"
                   onClick={handleBulkTrash}
-                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900"
+                  className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-800 text-white cursor-pointer"
                   title="Move selected to trash"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -955,7 +956,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               variant="ghost"
               size="icon"
               onClick={clearSelection}
-              className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900"
+              className="h-8 w-8 rounded-full hover:bg-slate-800 dark:hover:bg-slate-800 text-white cursor-pointer"
               title="Clear selection"
             >
               <X className="h-4 w-4" />

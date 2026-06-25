@@ -66,16 +66,19 @@ export default function AboutSection() {
         </p>
       </div>
 
-      <div className="p-5 border rounded-lg bg-background space-y-4">
-        <div className="flex items-center gap-3">
-          <img
-            src="/teledrive.png"
-            alt="TeleDrive Logo"
-            className="h-12 w-12 object-contain rounded-xl shadow-sm shrink-0"
-          />
-          <div>
-            <h4 className="text-md font-bold text-slate-800 dark:text-slate-200">TeleDrive</h4>
-            <span className="text-xs text-muted-foreground">Version {version}</span>
+      <div className="p-6 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 space-y-5 shadow-xs animate-fade-in">
+        <div className="flex items-center gap-3.5 group">
+          <div className="relative">
+            <div className="absolute inset-0 bg-brand-500/20 blur-sm rounded-xl" />
+            <img
+              src="/teledrive.png"
+              alt="TeleDrive Logo"
+              className="relative h-12 w-12 object-contain rounded-xl shadow-sm shrink-0 transition-transform duration-300 group-hover:scale-105"
+            />
+          </div>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">TeleDrive</h4>
+            <p className="text-xs text-slate-400 font-bold font-mono">v{version}</p>
           </div>
         </div>
 
@@ -88,38 +91,38 @@ export default function AboutSection() {
             variant="outline"
             size="sm"
             onClick={() => handleOpenLink("https://github.com/sayansenapati/teledrive")}
-            className="rounded-full text-xs font-semibold gap-2 border-slate-200 dark:border-slate-800"
+            className="rounded-xl text-xs font-bold gap-2 border-slate-200 dark:border-slate-800 cursor-pointer h-9 px-4"
           >
-            <GithubIcon className="h-3.5 w-3.5" />
+            <GithubIcon className="h-4 w-4" />
             GitHub Repository
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => handleOpenLink("https://github.com/sayansenapati/teledrive/issues")}
-            className="rounded-full text-xs font-semibold gap-2 border-slate-200 dark:border-slate-800"
+            className="rounded-xl text-xs font-bold gap-2 border-slate-200 dark:border-slate-800 cursor-pointer h-9 px-4"
           >
-            <Bug className="h-3.5 w-3.5" />
+            <Bug className="h-4 w-4 text-slate-500" />
             Report a Bug
           </Button>
         </div>
 
-        <div className="h-px bg-border" />
+        <div className="h-px bg-slate-100 dark:bg-slate-800/80" />
 
         <Button
           onClick={handleCheckUpdates}
           disabled={checking}
-          className="rounded-full text-xs font-semibold bg-brand-500 hover:bg-brand-600 px-5"
+          className="rounded-xl text-xs font-bold bg-brand-500 hover:bg-brand-600 px-5 h-10 shadow-md shadow-brand-500/10 cursor-pointer"
         >
           {checking ? "Checking for updates..." : "Check for Updates"}
         </Button>
       </div>
 
       {/* Disclaimer Section */}
-      <div className="flex gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-muted-foreground">
-        <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
+      <div className="flex gap-3.5 p-4 rounded-2xl border border-slate-200/40 dark:border-slate-850/30 bg-slate-100/50 dark:bg-slate-900/60 text-muted-foreground">
+        <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5 text-brand-500" />
         <div className="space-y-1 text-xs leading-relaxed">
-          <h5 className="font-bold text-slate-700 dark:text-slate-300">Disclaimer</h5>
+          <h5 className="font-extrabold text-slate-700 dark:text-slate-300 tracking-tight">Disclaimer</h5>
           <p>
             TeleDrive is an independent open-source client app and is not affiliated with, authorized, maintained, sponsored or endorsed by Telegram FZ-LLC or any of its affiliates. Use at your own risk.
           </p>

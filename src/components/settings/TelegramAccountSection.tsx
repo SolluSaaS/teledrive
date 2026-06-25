@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { LinkIcon, Smartphone, CheckCircle, Database } from "lucide-react";
+import { LinkIcon, Smartphone, Database } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { deleteSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_CHANNEL_ID } from "@/lib/secure/vault";
 import { Button } from "@/components/ui/button";
@@ -57,67 +57,69 @@ export default function TelegramAccountSection() {
       </div>
 
       {!isAuthenticated ? (
-        <div className="flex flex-col items-center justify-center p-8 border rounded-lg bg-slate-50/50 dark:bg-slate-900/10 text-center">
+        <div className="flex flex-col items-center justify-center p-8 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 text-center shadow-xs">
           <LinkIcon className="h-10 w-10 text-muted-foreground mb-3 stroke-[1.5]" />
-          <h4 className="font-semibold text-slate-800 dark:text-slate-200">Not connected</h4>
-          <p className="text-xs text-muted-foreground max-w-xs mt-1 mb-4">
+          <h4 className="font-extrabold text-slate-850 dark:text-slate-200 tracking-tight text-sm">Not connected</h4>
+          <p className="text-xs text-muted-foreground max-w-xs mt-1.5 mb-5 leading-relaxed">
             Connect your Telegram account to enable cloud storage features.
           </p>
           <Button
-            className="rounded-full bg-brand-500 hover:bg-brand-600 font-semibold px-6"
+            className="rounded-xl bg-brand-500 hover:bg-brand-600 font-bold px-6 h-10 text-xs shadow-md shadow-brand-500/10 cursor-pointer"
             onClick={() => navigate("/auth")}
           >
             Connect Telegram Account
           </Button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-fade-in">
           {/* Status Box */}
-          <div className="p-5 border rounded-lg bg-background flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-green-50 dark:bg-green-950/20 border border-green-200 flex items-center justify-center text-green-600 shrink-0">
+          <div className="p-6 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3.5">
+              <div className="h-10 w-10 rounded-full bg-green-500/10 dark:bg-green-500/20 border border-green-500/20 flex items-center justify-center text-green-600 dark:text-green-400 shrink-0">
                 <Smartphone className="h-5 w-5" />
               </div>
-              <div>
+              <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold">{phoneNumber}</span>
-                  <Badge className="bg-green-500 hover:bg-green-600 border-0 flex gap-1 items-center px-2 py-0">
-                    <CheckCircle className="h-3 w-3" />
+                  <span className="font-extrabold text-slate-850 dark:text-slate-200 text-sm tracking-tight">{phoneNumber}</span>
+                  <Badge className="bg-green-500 hover:bg-green-650 dark:bg-green-500/20 dark:text-green-400 dark:border dark:border-green-500/30 text-white font-extrabold text-[10px] uppercase tracking-wider px-2 py-0.5 border-0">
                     Connected
                   </Badge>
                 </div>
-                <span className="text-xs text-muted-foreground">Telegram session active</span>
+                <p className="text-xs text-muted-foreground">Telegram session active</p>
               </div>
             </div>
             
             <Button
               variant="outline"
               size="sm"
-              className="rounded-full text-xs font-semibold border-destructive text-destructive hover:bg-destructive/10 shrink-0 w-full sm:w-auto"
+              className="rounded-xl text-xs font-bold border-destructive text-destructive hover:bg-destructive/10 shrink-0 w-full sm:w-auto cursor-pointer"
               onClick={handleDisconnect}
             >
               Disconnect Account
             </Button>
           </div>
 
-          {/* Storage Bucket Info */}
-          <div className="p-5 border rounded-lg bg-background space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-full bg-brand-50 dark:bg-brand-950/20 border border-brand-200 flex items-center justify-center text-brand-600 shrink-0 mt-0.5">
+          {/* Storage Channel Info */}
+          <div className="p-6 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 space-y-5 shadow-xs">
+            <div className="flex items-start gap-3.5">
+              <div className="h-10 w-10 rounded-full bg-brand-500/10 dark:bg-brand-500/20 border border-brand-500/20 flex items-center justify-center text-brand-600 dark:text-brand-400 shrink-0 mt-0.5">
                 <Database className="h-5 w-5" />
               </div>
-              <div className="space-y-1">
-                <h4 className="text-sm font-semibold">Active Storage Channel</h4>
-                <p className="text-xs text-muted-foreground">
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <h4 className="text-sm font-extrabold text-slate-850 dark:text-slate-200 tracking-tight">Active Storage Channel</h4>
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   Your files are stored in the private Telegram channel:
                 </p>
-                <div className="text-xs font-mono bg-slate-50 dark:bg-slate-900 border px-3 py-1.5 rounded-lg inline-block mt-2">
-                  Name: <span className="font-semibold text-slate-800 dark:text-slate-200">TeleDrive Storage</span>
+                <div className="text-xs font-mono bg-slate-50 dark:bg-slate-950/40 border dark:border-slate-850/80 px-4 py-2.5 rounded-xl block mt-2 select-text overflow-x-auto leading-relaxed text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 font-bold">NAME:</span>
+                    <span className="font-bold text-slate-850 dark:text-slate-100">TeleDrive Storage</span>
+                  </div>
                   {channelId && (
-                    <>
-                      <br />
-                      ID: <span className="font-semibold text-slate-800 dark:text-slate-200">{channelId}</span>
-                    </>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className="text-slate-400 font-bold">ID:</span>
+                      <span className="font-bold text-slate-850 dark:text-slate-100">{channelId}</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -127,7 +129,7 @@ export default function TelegramAccountSection() {
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-full text-xs font-semibold"
+                className="rounded-xl text-xs font-bold border-slate-200 dark:border-slate-800 cursor-pointer"
                 onClick={() => setIsDialogOpen(true)}
               >
                 Change Storage Channel
@@ -136,7 +138,7 @@ export default function TelegramAccountSection() {
           </div>
 
           {/* Info Card */}
-          <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border text-xs text-muted-foreground leading-relaxed">
+          <div className="p-4 rounded-2xl bg-slate-100/50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-850/30 text-xs text-muted-foreground leading-relaxed">
             💡 <strong>How files are stored:</strong> Your files are stored inside a private Telegram channel in your account. TeleDrive automatically creates this channel and reads the file list from a pinned message index.
           </div>
         </div>
@@ -144,22 +146,22 @@ export default function TelegramAccountSection() {
 
       {/* Change storage channel dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl max-w-md">
           <DialogHeader>
-            <DialogTitle>Change Storage Channel</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="font-bold text-slate-850 dark:text-slate-200">Change Storage Channel</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
               This allows you to select a different private channel for TeleDrive storage.
             </DialogDescription>
           </DialogHeader>
-          <div className="p-4 bg-muted/30 border rounded-lg text-xs text-muted-foreground leading-relaxed">
+          <div className="p-4 bg-red-500/10 border border-red-500/20 dark:border-red-500/30 rounded-xl text-xs text-red-650 dark:text-red-400 leading-relaxed font-semibold">
             ⚠️ <strong>Warning:</strong> Changing your storage channel will disconnect the active file list index. TeleDrive will look for a pinned index message in the selected channel or create one.
           </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={() => setIsDialogOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="ghost" className="rounded-xl text-xs" onClick={() => setIsDialogOpen(false)}>
               Cancel
             </Button>
             <Button
-              className="rounded-full bg-brand-500 hover:bg-brand-600"
+              className="rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs"
               onClick={async () => {
                 setIsDialogOpen(false);
                 try {

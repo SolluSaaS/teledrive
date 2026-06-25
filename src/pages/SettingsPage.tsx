@@ -57,11 +57,11 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
       {/* Topbar Settings Header */}
-      <header className="flex items-center gap-4 border-b px-4 h-14 md:h-16 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="flex items-center gap-4 border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
         <Button
           variant="ghost"
           size="icon"
-          className="rounded-full hover:bg-muted"
+          className="rounded-full hover:bg-muted cursor-pointer"
           onClick={() => {
             if (isMobile && mobileShowContent) {
               setMobileShowContent(false);
@@ -70,17 +70,17 @@ export default function SettingsPage() {
             }
           }}
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="h-5 w-5 text-slate-600 dark:text-slate-400" />
         </Button>
-        <h2 className="text-lg font-bold tracking-tight">Settings</h2>
+        <h2 className="text-base font-extrabold tracking-tight">Settings</h2>
       </header>
 
       {/* Main settings body */}
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop Split View: Nav List */}
         {(!isMobile || !mobileShowContent) && (
-          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/50 dark:bg-slate-900/10 shrink-0 overflow-y-auto">
-            <div className="p-3 space-y-1">
+          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/20 dark:bg-slate-900/5 shrink-0 overflow-y-auto border-slate-250 dark:border-slate-800/80">
+            <div className="p-3 space-y-1.5">
               {sections.map((sec) => {
                 const Icon = sec.icon;
                 const isSelected = activeSection === sec.id;
@@ -88,13 +88,16 @@ export default function SettingsPage() {
                   <button
                     key={sec.id}
                     onClick={() => (isMobile ? handleMobileSelect(sec.id) : setActiveSection(sec.id))}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-colors text-left ${
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-left relative group cursor-pointer ${
                       isSelected && !isMobile
-                        ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-sm"
-                        : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-900/50 hover:text-foreground border border-transparent"
+                        ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
+                        : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border border-transparent hover:translate-x-0.5"
                     }`}
                   >
-                    <Icon className="h-4.5 w-4.5 shrink-0" />
+                    {isSelected && !isMobile && (
+                      <div className="absolute left-0 top-3 bottom-3 w-1 bg-brand-500 rounded-r-full shadow-[0_0_8px_rgba(26,115,232,0.6)]" />
+                    )}
+                    <Icon className={`h-4.5 w-4.5 shrink-0 transition-transform duration-200 ${isSelected && !isMobile ? "text-brand-500 scale-105" : "text-muted-foreground group-hover:text-foreground"}`} />
                     <span>{sec.label}</span>
                   </button>
                 );
@@ -105,8 +108,10 @@ export default function SettingsPage() {
 
         {/* Settings Panel Content Area */}
         {(!isMobile || mobileShowContent) && (
-          <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background">
-            <ActiveComponent />
+          <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background/50 backdrop-blur-md">
+            <div className="max-w-2xl animate-fade-in">
+              <ActiveComponent />
+            </div>
           </div>
         )}
       </div>

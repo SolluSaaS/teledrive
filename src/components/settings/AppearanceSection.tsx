@@ -1,6 +1,7 @@
 import { Sun, Moon, Laptop } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export default function AppearanceSection() {
   const theme = useUIStore((state) => state.theme);
@@ -22,7 +23,7 @@ export default function AppearanceSection() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Theme mode</label>
+        <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Theme mode</label>
         
         <div className="grid grid-cols-3 gap-3">
           {themeOptions.map((opt) => {
@@ -33,14 +34,15 @@ export default function AppearanceSection() {
                 key={opt.value}
                 type="button"
                 variant={isSelected ? "default" : "outline"}
-                className={`h-24 rounded-xl flex flex-col gap-2 justify-center font-semibold text-xs border ${
+                className={cn(
+                  "h-24 rounded-2xl flex flex-col gap-2 justify-center font-extrabold text-xs border transition-all duration-300 cursor-pointer hover:-translate-y-0.5 hover:shadow-xs border-slate-200 dark:border-slate-800",
                   isSelected
-                    ? "bg-brand-500 hover:bg-brand-600 text-white border-brand-500 shadow-md shadow-brand-500/10"
-                    : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900"
-                }`}
+                    ? "bg-brand-500 text-white border-brand-500 shadow-md shadow-brand-500/10 dark:bg-brand-500/20 dark:text-brand-400 dark:border-brand-500/30"
+                    : "bg-white dark:bg-slate-900/40 hover:bg-slate-50 dark:hover:bg-slate-900/60 text-slate-700 dark:text-slate-300"
+                )}
                 onClick={() => setTheme(opt.value)}
               >
-                <Icon className={`h-5 w-5 ${isSelected ? "text-white" : "text-muted-foreground"}`} />
+                <Icon className={cn("h-5 w-5 transition-transform", isSelected ? "text-white dark:text-brand-400 scale-110" : "text-muted-foreground")} />
                 {opt.label}
               </Button>
             );
@@ -48,7 +50,7 @@ export default function AppearanceSection() {
         </div>
       </div>
 
-      <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border text-xs text-muted-foreground leading-relaxed">
+      <div className="p-4 rounded-2xl bg-slate-100/50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-850/30 text-xs text-muted-foreground leading-relaxed">
         💡 <strong>System Mode:</strong> Adjusts the theme color of TeleDrive according to your operating system appearance preference automatically.
       </div>
     </div>

@@ -79,32 +79,36 @@ export default function StorageSection() {
         </p>
       </div>
 
-      <div className="p-5 border rounded-lg bg-background space-y-5">
+      <div className="p-6 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 space-y-6 shadow-xs animate-fade-in">
         {/* Total used */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-brand-50 dark:bg-brand-950/20 border border-brand-200 flex items-center justify-center text-brand-600 shrink-0">
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 rounded-full bg-brand-500/10 dark:bg-brand-500/20 border border-brand-500/20 flex items-center justify-center text-brand-600 dark:text-brand-400 shrink-0">
             <HardDrive className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-xs text-muted-foreground block">Total Space Used</span>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Total Space Used</span>
             {isRefreshing ? (
-              <span className="text-xl font-bold flex items-center gap-2 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-xl font-bold flex items-center gap-2 text-slate-550 dark:text-slate-400">
+                <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
                 Calculating…
               </span>
             ) : (
-              <span className="text-xl font-bold">{formattedSize}</span>
+              <span className="text-xl font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">{formattedSize}</span>
             )}
           </div>
         </div>
 
-        {/* Used / unlimited label */}
-        <div className="space-y-1">
+        {/* Custom progress bar */}
+        <div className="space-y-2">
+          <div className="w-full h-2 bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden relative border dark:border-slate-850/50">
+            <div className="absolute top-0 bottom-0 left-0 w-[35%] bg-gradient-to-r from-brand-500 to-indigo-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)] animate-pulse" />
+          </div>
+          
           <div className="flex justify-between items-center text-xs">
-            <span className="text-muted-foreground">
+            <span className="text-xs text-muted-foreground font-semibold">
               {isRefreshing ? "Calculating…" : `${formattedSize} used`}
             </span>
-            <span className="font-bold text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800/40 rounded-full px-2.5 py-0.5 select-none">
+            <span className="text-[10px] font-extrabold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 select-none uppercase tracking-wider">
               Unlimited Storage Available
             </span>
           </div>
@@ -113,22 +117,22 @@ export default function StorageSection() {
         <Separator />
 
         {/* Stats grid */}
-        <div className="grid grid-cols-3 gap-4 text-sm py-1">
-          <div>
-            <span className="text-xs text-muted-foreground block">Files stored</span>
-            <span className="font-bold text-slate-800 dark:text-slate-200">
+        <div className="grid grid-cols-3 gap-4 text-xs py-1 select-none">
+          <div className="space-y-0.5">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Files stored</span>
+            <span className="font-extrabold text-base text-slate-850 dark:text-slate-100">
               {isRefreshing ? "…" : activeFiles.length}
             </span>
           </div>
-          <div>
-            <span className="text-xs text-muted-foreground block">Folders created</span>
-            <span className="font-bold text-slate-800 dark:text-slate-200">
+          <div className="space-y-0.5">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Folders created</span>
+            <span className="font-extrabold text-base text-slate-850 dark:text-slate-100">
               {isRefreshing ? "…" : activeFolders.length}
             </span>
           </div>
-          <div>
-            <span className="text-xs text-muted-foreground block">In Trash</span>
-            <span className="font-bold text-slate-500 dark:text-slate-400">
+          <div className="space-y-0.5">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">In Trash</span>
+            <span className="font-bold text-base text-slate-500 dark:text-slate-400">
               {isRefreshing ? "…" : trashedItems.length}
             </span>
           </div>
@@ -139,20 +143,20 @@ export default function StorageSection() {
           size="sm"
           disabled={isRefreshing}
           onClick={handleRecalculate}
-          className="rounded-full text-xs font-semibold gap-2"
+          className="rounded-xl text-xs font-bold gap-2 h-10 border-slate-200 dark:border-slate-800 cursor-pointer"
         >
           {isRefreshing ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin text-brand-500" />
           ) : (
-            <RefreshCw className="h-3 w-3" />
+            <RefreshCw className="h-4 w-4 text-slate-500 dark:text-slate-400" />
           )}
           {isRefreshing ? "Recalculating…" : "Recalculate"}
         </Button>
       </div>
 
       {/* Info banner */}
-      <div className="flex gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-muted-foreground">
-        <Info className="h-5 w-5 shrink-0 mt-0.5" />
+      <div className="flex gap-3.5 p-4 rounded-2xl border border-slate-200/40 dark:border-slate-850/30 bg-slate-100/50 dark:bg-slate-900/60 text-muted-foreground">
+        <Info className="h-5 w-5 shrink-0 mt-0.5 text-brand-500" />
         <div className="space-y-1 text-xs leading-relaxed">
           <p>
             *Telegram does not impose an official cap on total storage inside personal private channels.
