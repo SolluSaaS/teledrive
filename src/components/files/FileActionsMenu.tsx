@@ -15,6 +15,8 @@ import {
   Star,
   Trash2,
   RotateCcw,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 
@@ -28,6 +30,8 @@ interface FileActionsMenuProps {
   onMoveTo?: (file: TeleFile) => void;
   /** Called when user clicks "Delete Permanently" in trash mode */
   onDeletePermanently?: (file: TeleFile) => void;
+  onArchive?: (file: TeleFile) => void;
+  onUnarchive?: (file: TeleFile) => void;
 }
 
 export function FileActionsMenu({
@@ -39,6 +43,8 @@ export function FileActionsMenu({
   onTrash,
   onMoveTo,
   onDeletePermanently,
+  onArchive,
+  onUnarchive,
 }: FileActionsMenuProps) {
   const isDirectory = file.mime === "inode/directory" || file.mime === "application/x-directory";
 
@@ -59,7 +65,7 @@ export function FileActionsMenu({
         className="w-52 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md"
         onClick={(e) => e.stopPropagation()}
       >
-        {!isDirectory && !file.trashed && (
+        {!isDirectory && !file.trashed && !file.archived && (
           <DropdownMenuItem
             onClick={() => onPreview(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -68,7 +74,7 @@ export function FileActionsMenu({
             <span>Preview</span>
           </DropdownMenuItem>
         )}
-        {!isDirectory && !file.trashed && (
+        {!isDirectory && !file.trashed && !file.archived && (
           <DropdownMenuItem
             onClick={() => onDownload(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -77,8 +83,8 @@ export function FileActionsMenu({
             <span>Download</span>
           </DropdownMenuItem>
         )}
-        
-        {!file.trashed && (
+
+        {!file.trashed && !file.archived && (
           <DropdownMenuItem
             onClick={() => onRename(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -88,7 +94,7 @@ export function FileActionsMenu({
           </DropdownMenuItem>
         )}
 
-        {onMoveTo && !file.trashed && (
+        {onMoveTo && !file.trashed && !file.archived && (
           <DropdownMenuItem
             onClick={() => onMoveTo(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -98,7 +104,7 @@ export function FileActionsMenu({
           </DropdownMenuItem>
         )}
 
-        {!file.trashed && (
+        {!file.trashed && !file.archived && (
           <DropdownMenuItem
             onClick={() => onStarToggle(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -108,6 +114,30 @@ export function FileActionsMenu({
           </DropdownMenuItem>
         )}
 
+        {/* Archive / Unarchive */}
+        {!file.trashed && !file.archived && onArchive && (
+          <>
+            <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
+            <DropdownMenuItem
+              onClick={() => onArchive(file)}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+            >
+              <Archive className="h-4 w-4 text-slate-400" />
+              <span>Archive</span>
+            </DropdownMenuItem>
+          </>
+        )}
+        {file.archived && onUnarchive && (
+          <DropdownMenuItem
+            onClick={() => onUnarchive(file)}
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-brand-600 dark:text-brand-400"
+          >
+            <ArchiveRestore className="h-4 w-4" />
+            <span>Unarchive</span>
+          </DropdownMenuItem>
+        )}
+
+        {/* Trash / Restore / Delete Permanently */}
         {file.trashed ? (
           <>
             {/* --- Restore option --- */}
@@ -132,7 +162,7 @@ export function FileActionsMenu({
               </>
             )}
           </>
-        ) : (
+        ) : !file.archived ? (
           <>
             <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
             <DropdownMenuItem
@@ -143,7 +173,7 @@ export function FileActionsMenu({
               <span>Move to Trash</span>
             </DropdownMenuItem>
           </>
-        )}
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2 } from "lucide-react";
+import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
@@ -248,10 +248,13 @@ export default function DriveLayout() {
     return cleaned.slice(0, 2).toUpperCase() || "TD";
   };
 
+  const archivedCount = files.filter((f) => f.archived && !f.trashed).length;
+
   const navItems = [
     { label: "My Drive", icon: HardDrive, path: "/drive/my-drive" },
     { label: "Recent", icon: Clock, path: "/drive/recent" },
     { label: "Starred", icon: Star, path: "/drive/starred" },
+    { label: "Archived", icon: Archive, path: "/drive/archived", badge: archivedCount },
     { label: "Trash", icon: Trash2, path: "/drive/trash" },
   ];
 
@@ -276,7 +279,12 @@ export default function DriveLayout() {
               }`}
             >
               <Icon className="h-4.5 w-4.5 shrink-0" />
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {(item as any).badge > 0 && (
+                <span className="ml-auto text-[10px] font-bold bg-brand-100 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800/50 rounded-full px-2 py-0.5 min-w-[20px] text-center">
+                  {(item as any).badge}
+                </span>
+              )}
             </Link>
           );
         })}

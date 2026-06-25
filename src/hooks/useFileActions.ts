@@ -110,6 +110,37 @@ export function useFileActions() {
     }
   };
 
+  const archiveFile = async (file: TeleFile) => {
+    setIsOperating(true);
+    try {
+      const channelId = await getChannelId();
+      // Archiving clears starred so the file leaves the Starred view too
+      const updated = await updateFile(channelId, file.id, { archived: true, starred: false });
+      setFiles(updated);
+      toast.success(`"${file.name}" archived`);
+    } catch (err: any) {
+      console.error("Failed to archive:", err);
+      toast.error(err.message || "Failed to archive");
+    } finally {
+      setIsOperating(false);
+    }
+  };
+
+  const unarchiveFile = async (file: TeleFile) => {
+    setIsOperating(true);
+    try {
+      const channelId = await getChannelId();
+      const updated = await updateFile(channelId, file.id, { archived: false });
+      setFiles(updated);
+      toast.success(`"${file.name}" moved back to My Drive`);
+    } catch (err: any) {
+      console.error("Failed to unarchive:", err);
+      toast.error(err.message || "Failed to unarchive");
+    } finally {
+      setIsOperating(false);
+    }
+  };
+
   /**
    * Permanently deletes a single file:
    * 1. Removes it from the metadata index
@@ -195,6 +226,8 @@ export function useFileActions() {
     toggleStar,
     moveToTrash,
     restoreFromTrash,
+    archiveFile,
+    unarchiveFile,
     deletePermanently,
     emptyTrash,
   };

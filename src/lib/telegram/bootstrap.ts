@@ -73,6 +73,7 @@ export async function bootstrapTeleDrive(
         uploadedAt: (msg.date || 0) * 1000,
         starred: false,
         trashed: false,
+        archived: false,
       });
     }
 

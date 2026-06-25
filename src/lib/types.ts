@@ -9,6 +9,7 @@ export interface TeleFile {
   uploadedAt: number;
   starred?: boolean;
   trashed?: boolean;
+  archived?: boolean;
   lastOpenedAt?: number;
   thumbnailUrl?: string;
 }

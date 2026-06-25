@@ -13,6 +13,7 @@ const MyDrivePage = lazy(() => import("./pages/MyDrivePage"));
 const RecentPage = lazy(() => import("./pages/RecentPage"));
 const StarredPage = lazy(() => import("./pages/StarredPage"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
+const ArchivedPage = lazy(() => import("./pages/ArchivedPage"));
 const FolderPage = lazy(() => import("./pages/FolderPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
@@ -118,6 +119,7 @@ function App() {
             <Route path="recent" element={<RecentPage />} />
             <Route path="starred" element={<StarredPage />} />
             <Route path="trash" element={<TrashPage />} />
+            <Route path="archived" element={<ArchivedPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="folder/*" element={<FolderPage />} />
           </Route>

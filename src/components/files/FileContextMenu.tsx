@@ -14,6 +14,8 @@ import {
   Star,
   Trash2,
   RotateCcw,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 
@@ -27,6 +29,8 @@ interface FileContextMenuProps {
   onTrash: (file: TeleFile) => void;
   onMoveTo?: (file: TeleFile) => void;
   onDeletePermanently?: (file: TeleFile) => void;
+  onArchive?: (file: TeleFile) => void;
+  onUnarchive?: (file: TeleFile) => void;
 }
 
 export function FileContextMenu({
@@ -39,14 +43,16 @@ export function FileContextMenu({
   onTrash,
   onMoveTo,
   onDeletePermanently,
+  onArchive,
+  onUnarchive,
 }: FileContextMenuProps) {
   const isDirectory = file.mime === "inode/directory" || file.mime === "application/x-directory";
-  
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-52 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md">
-        {!isDirectory && !file.trashed && (
+        {!isDirectory && !file.trashed && !file.archived && (
           <ContextMenuItem
             onClick={() => onPreview(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -55,7 +61,7 @@ export function FileContextMenu({
             <span>Preview</span>
           </ContextMenuItem>
         )}
-        {!isDirectory && !file.trashed && (
+        {!isDirectory && !file.trashed && !file.archived && (
           <ContextMenuItem
             onClick={() => onDownload(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -64,8 +70,8 @@ export function FileContextMenu({
             <span>Download</span>
           </ContextMenuItem>
         )}
-        
-        {!file.trashed && (
+
+        {!file.trashed && !file.archived && (
           <ContextMenuItem
             onClick={() => onRename(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -75,7 +81,7 @@ export function FileContextMenu({
           </ContextMenuItem>
         )}
 
-        {onMoveTo && !file.trashed && (
+        {onMoveTo && !file.trashed && !file.archived && (
           <ContextMenuItem
             onClick={() => onMoveTo(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -85,7 +91,7 @@ export function FileContextMenu({
           </ContextMenuItem>
         )}
 
-        {!file.trashed && (
+        {!file.trashed && !file.archived && (
           <ContextMenuItem
             onClick={() => onStarToggle(file)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
@@ -95,6 +101,30 @@ export function FileContextMenu({
           </ContextMenuItem>
         )}
 
+        {/* Archive / Unarchive */}
+        {!file.trashed && !file.archived && onArchive && (
+          <>
+            <ContextMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
+            <ContextMenuItem
+              onClick={() => onArchive(file)}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+            >
+              <Archive className="h-4 w-4 text-slate-400" />
+              <span>Archive</span>
+            </ContextMenuItem>
+          </>
+        )}
+        {file.archived && onUnarchive && (
+          <ContextMenuItem
+            onClick={() => onUnarchive(file)}
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+          >
+            <ArchiveRestore className="h-4 w-4 text-brand-500" />
+            <span>Unarchive</span>
+          </ContextMenuItem>
+        )}
+
+        {/* Trash / Restore / Delete Permanently */}
         {file.trashed ? (
           <>
             <ContextMenuItem
@@ -117,7 +147,7 @@ export function FileContextMenu({
               </>
             )}
           </>
-        ) : (
+        ) : !file.archived ? (
           <>
             <ContextMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
             <ContextMenuItem
@@ -128,7 +158,7 @@ export function FileContextMenu({
               <span>Move to Trash</span>
             </ContextMenuItem>
           </>
-        )}
+        ) : null}
       </ContextMenuContent>
     </ContextMenu>
   );

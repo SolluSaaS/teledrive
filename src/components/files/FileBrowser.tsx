@@ -18,6 +18,7 @@ import {
   Eye,
   Download,
   Edit2,
+  Archive,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -61,7 +62,7 @@ function formatFileSize(bytes: unknown): string {
 
 interface FileBrowserProps {
   folderPath?: string;
-  mode?: "drive" | "starred" | "recent" | "trash" | "search";
+  mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived";
   searchQuery?: string;
 }
 
@@ -91,6 +92,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     toggleStar,
     moveToTrash,
     restoreFromTrash,
+    archiveFile,
+    unarchiveFile,
     deletePermanently,
     emptyTrash,
     isOperating,
@@ -150,20 +153,23 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     let filtered = [...files];
 
     if (mode === "drive") {
-      // Show files in the active directory, not trashed
-      filtered = filtered.filter((f) => f.folderPath === folderPath && !f.trashed);
+      // Show files in the active directory, not trashed, not archived
+      filtered = filtered.filter((f) => f.folderPath === folderPath && !f.trashed && !f.archived);
     } else if (mode === "starred") {
-      // Show all starred files, not trashed
-      filtered = filtered.filter((f) => f.starred && !f.trashed);
+      // Show all starred files, not trashed, not archived
+      filtered = filtered.filter((f) => f.starred && !f.trashed && !f.archived);
     } else if (mode === "recent") {
-      // Show all files, not trashed
-      filtered = filtered.filter((f) => !f.trashed);
+      // Show all files, not trashed, not archived
+      filtered = filtered.filter((f) => !f.trashed && !f.archived);
     } else if (mode === "trash") {
       // Show all trashed files
       filtered = filtered.filter((f) => f.trashed);
+    } else if (mode === "archived") {
+      // Show all archived, non-trashed files
+      filtered = filtered.filter((f) => f.archived && !f.trashed);
     } else if (mode === "search") {
-      // Show search matches among non-trashed files
-      filtered = fuzzySearch(filtered.filter((f) => !f.trashed), searchQuery);
+      // Show search matches among non-trashed, non-archived files
+      filtered = fuzzySearch(filtered.filter((f) => !f.trashed && !f.archived), searchQuery);
     }
 
     // Apply category filter
@@ -379,6 +385,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         return "Recent";
       case "trash":
         return "Trash";
+      case "archived":
+        return "Archived";
       case "search":
         return `Search results for "${searchQuery}"`;
       default:
@@ -407,6 +415,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       title = "Trash is empty";
       subtitle = "Items moved to the trash will show up here.";
       Icon = Trash2;
+    } else if (mode === "archived") {
+      title = "No archived files";
+      subtitle = "Archive files you want to keep but don't need in your main drive.";
+      Icon = Archive;
     } else if (mode === "search") {
       title = "No search results";
       subtitle = `We couldn't find any items matching "${searchQuery}".`;
@@ -672,6 +684,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onRename={openRenameDialog}
                       onStarToggle={toggleStar}
                       onTrash={moveToTrash}
+                      onDeletePermanently={setDeleteTarget}
+                      onArchive={archiveFile}
+                      onUnarchive={unarchiveFile}
                     >
                       <div
                         onClick={(e) => handleItemClick(e, folder)}
@@ -701,6 +716,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             onStarToggle={toggleStar}
                             onTrash={moveToTrash}
                             onDeletePermanently={setDeleteTarget}
+                            onArchive={archiveFile}
+                            onUnarchive={unarchiveFile}
                           />
                         </div>
                       </div>
@@ -730,6 +747,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onStarToggle={toggleStar}
                       onTrash={moveToTrash}
                       onDeletePermanently={setDeleteTarget}
+                      onArchive={archiveFile}
+                      onUnarchive={unarchiveFile}
                     >
                       <div
                         onClick={(e) => handleItemClick(e, file)}
@@ -771,6 +790,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                               onStarToggle={toggleStar}
                               onTrash={moveToTrash}
                               onDeletePermanently={setDeleteTarget}
+                              onArchive={archiveFile}
+                              onUnarchive={unarchiveFile}
                             />
                           </div>
                         </div>
@@ -824,6 +845,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     onStarToggle={toggleStar}
                     onTrash={moveToTrash}
                     onDeletePermanently={setDeleteTarget}
+                    onArchive={archiveFile}
+                    onUnarchive={unarchiveFile}
                   >
                     <tr
                       onClick={(e) => handleItemClick(e, file)}
@@ -871,6 +894,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           onStarToggle={toggleStar}
                           onTrash={moveToTrash}
                           onDeletePermanently={setDeleteTarget}
+                          onArchive={archiveFile}
+                          onUnarchive={unarchiveFile}
                         />
                       </td>
                     </tr>
