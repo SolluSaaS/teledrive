@@ -45,6 +45,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { fuzzySearch } from "@/lib/search/searchEngine";
+import { getFileCategory } from "@/lib/files/fileUtils";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -121,40 +122,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
     if (isDir) return false; // Hide folders when a media filter is active
 
-    const m = file.mime.toLowerCase();
-    switch (filter) {
-      case "Documents":
-        return (
-          m.startsWith("text/") ||
-          m.includes("document") ||
-          m.includes("msword") ||
-          m === "application/pdf" ||
-          m.includes("spreadsheet") ||
-          m.includes("excel") ||
-          m === "text/csv" ||
-          m.includes("presentation") ||
-          m.includes("powerpoint") ||
-          m === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-          m === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-          m === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        );
-      case "Images":
-        return m.startsWith("image/");
-      case "Videos":
-        return m.startsWith("video/");
-      case "Audio":
-        return m.startsWith("audio/");
-      case "Archives":
-        return (
-          m.includes("zip") ||
-          m.includes("tar") ||
-          m.includes("rar") ||
-          m.includes("gzip") ||
-          m.includes("archive")
-        );
-      default:
-        return true;
-    }
+    const category = getFileCategory(file.name, file.mime);
+    return category === filter;
   };
 
   const getSortLabel = (val: string) => {
@@ -780,7 +749,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       >
                         {/* Upper icon/preview box */}
                         <div className="flex-1 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center p-4 relative border-b border-slate-100 dark:border-slate-800/40">
-                          <FileIcon mime={file.mime} size="lg" />
+                          <FileIcon name={file.name} mime={file.mime} size="lg" />
                           {file.starred && (
                             <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                           )}
@@ -880,7 +849,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       </td>
                       <td className="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
                         <div className="flex items-center gap-2.5">
-                          <FileIcon mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent" />
+                          <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent" />
                           <span className="truncate max-w-[200px] sm:max-w-xs">{file.name}</span>
                           {file.starred && (
                             <Star className="h-3 w-3 fill-amber-400 text-amber-400 shrink-0" />
@@ -1050,7 +1019,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             {mobileContextFile && (
               <div className="space-y-4 select-none">
                 <div className="flex items-center gap-3 border-b pb-3">
-                  <FileIcon mime={mobileContextFile.mime} size="sm" />
+                  <FileIcon name={mobileContextFile.name} mime={mobileContextFile.mime} size="sm" />
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                       {mobileContextFile.name}

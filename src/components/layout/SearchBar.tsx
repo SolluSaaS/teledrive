@@ -98,7 +98,7 @@ export default function SearchBar() {
                     onMouseDown={() => handleQuickResultClick(file)} // use onMouseDown to fire before input blur closes dropdown
                     className="flex items-center gap-3 px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors"
                   >
-                    <FileIcon mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent shrink-0" />
+                    <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
                         {file.name}
