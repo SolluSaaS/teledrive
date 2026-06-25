@@ -149,7 +149,7 @@ export default function DriveLayout() {
 
     const handleRefreshFiles = async () => {
       try {
-        await bootstrapTeleDrive();
+        await bootstrapTeleDrive(undefined, phoneNumber ?? "");
       } catch (err) {
         console.error("Refresh failed:", err);
       }
@@ -202,7 +202,7 @@ export default function DriveLayout() {
       setIsRefreshing(true);
       setPullProgress(100);
       try {
-        await bootstrapTeleDrive();
+        await bootstrapTeleDrive(undefined, phoneNumber ?? "");
       } catch (err) {
         console.error("Failed to refresh:", err);
       } finally {
@@ -313,12 +313,7 @@ export default function DriveLayout() {
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">used</span>
           </div>
           
-          {/* Custom progress bar */}
-          <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-850 rounded-full overflow-hidden relative">
-            <div className="absolute top-0 bottom-0 left-0 w-[35%] bg-gradient-to-r from-brand-500 to-indigo-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)] animate-pulse" />
-          </div>
-          
-          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-block select-none">
+          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-block select-none mt-1">
             Unlimited Storage
           </div>
         </div>

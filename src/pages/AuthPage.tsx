@@ -270,7 +270,7 @@ export default function AuthPage() {
       try {
         await bootstrapTeleDrive((status) => {
           if (isMounted) setBootstrapStatus(status);
-        });
+        }, phone.trim());
         if (isMounted) {
           toast.success("TeleDrive is ready!");
           navigate("/drive/my-drive");

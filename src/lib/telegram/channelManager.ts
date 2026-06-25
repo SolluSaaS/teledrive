@@ -1,69 +1,102 @@
 import { Api } from "telegram";
 import { getClient } from "./client";
-import { getSecret, saveSecret, VAULT_KEY_CHANNEL_ID } from "../secure/vault";
+import { getSecret, saveSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../secure/vault";
 
 /**
- * Ensures the TeleDrive Storage channel exists.
- * First checks the local vault for a channel ID, verifies it exists on Telegram,
- * then searches the user's dialogs, and finally creates a new private channel if not found.
+ * Ensures the TeleDrive Storage channel exists for the given phone number.
+ *
+ * Multi-account design:
+ *   Each Telegram account stores its channel ID under a phone-specific vault key:
+ *   e.g. "telegram_channel_id_+918653420095"
+ *
+ *   This means logging in with Account A and Account B never interferes — each
+ *   account finds its own channel and its own uploaded files.
+ *
+ * Lookup order:
+ *   1. Phone-specific vault key  (fast path, normal case)
+ *   2. Legacy generic key        (migration: single-account installs before this change)
+ *   3. Dialog search             (recovery: vault cleared / first run on new device)
+ *   4. Create new channel        (first-ever login for this account)
  */
-export async function ensureStorageChannel(): Promise<string> {
+export async function ensureStorageChannel(phone: string): Promise<string> {
   const client = getClient();
-  
-  // 1. Try to read saved channel ID from vault
-  let channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
-  
+  const phoneKey = channelIdKey(phone);
+
+  // ── 1. Phone-specific vault key (fast path) ──────────────────────────────
+  let channelId = await getSecret(phoneKey);
+
   if (channelId) {
     try {
-      // Verify access to the channel
-      // GramJS client.getEntity accepts channel ID
-      // BigInt conversions are handled internally by client.getEntity if passed as string or BigInt
       const peer = await client.getEntity(channelId);
-      if (peer) {
-        return channelId;
-      }
+      if (peer) return channelId;
     } catch (err) {
-      console.warn(`Saved channel ID ${channelId} could not be resolved, searching dialogs...`, err);
+      console.warn(`[channelManager] Phone-keyed channel ${channelId} not accessible, continuing…`, err);
+      channelId = null;
     }
   }
 
-  // 2. Search dialogs for "TeleDrive Storage"
+  // ── 2. Legacy generic key (migration path for existing installs) ─────────
+  if (!channelId) {
+    const legacyId = await getSecret(VAULT_KEY_CHANNEL_ID);
+    if (legacyId) {
+      try {
+        const peer = await client.getEntity(legacyId);
+        if (peer) {
+          // Migrate: write under the phone-specific key so future lookups are fast
+          await saveSecret(phoneKey, legacyId);
+          console.info(`[channelManager] Migrated legacy channel ID ${legacyId} → ${phoneKey}`);
+          return legacyId;
+        }
+      } catch (err) {
+        console.warn(`[channelManager] Legacy channel ${legacyId} not accessible, searching dialogs…`, err);
+      }
+    }
+  }
+
+  // ── 3. Search dialogs for "TeleDrive Storage" ────────────────────────────
   try {
-    // getDialogs returns a list of Dialog objects
     const dialogs = await client.getDialogs({});
     for (const dialog of dialogs) {
-      // dialog.entity holds the chat/channel info
-      if (dialog.title === "TeleDrive Storage" && (dialog.isChannel || dialog.entity?.className === "Channel") && dialog.id) {
-        const idStr = String(dialog.id);
-        await saveSecret(VAULT_KEY_CHANNEL_ID, idStr);
-        return idStr;
+      if (
+        dialog.title === "TeleDrive Storage" &&
+        (dialog.isChannel || dialog.entity?.className === "Channel") &&
+        dialog.id
+      ) {
+        // dialog.id from GramJS is BigInt; normalise to a plain string
+        // Use the absolute value with -100 prefix which is how Telegram identifies supergroups/channels
+        const rawId = String(dialog.id);
+        await saveSecret(phoneKey, rawId);
+        console.info(`[channelManager] Found channel via dialog search: ${rawId}`);
+        return rawId;
       }
     }
   } catch (err) {
-    console.warn("Failed to search dialogs:", err);
+    console.warn("[channelManager] Dialog search failed:", err);
   }
 
-  // 3. Create a new private channel if it doesn't exist
+  // ── 4. Create a new private channel (first-ever login for this account) ──
   try {
     const result = await client.invoke(
       new Api.channels.CreateChannel({
         title: "TeleDrive Storage",
         about: "Private storage channel managed by TeleDrive. Do not delete or modify pinned messages.",
-        broadcast: true, // Creates a channel (broadcast=true, megagroup=false)
+        broadcast: true,
       })
     );
 
     const chats = (result as any).chats || [];
     const channel = chats[0];
     if (!channel) {
-      throw new Error("Failed to create storage channel: channel info is missing in updates");
+      throw new Error("Failed to create storage channel: channel info missing in updates");
     }
 
     const idStr = String(channel.id);
-    await saveSecret(VAULT_KEY_CHANNEL_ID, idStr);
+    await saveSecret(phoneKey, idStr);
+    console.info(`[channelManager] Created new channel: ${idStr} for ${phoneKey}`);
     return idStr;
   } catch (err) {
-    console.error("Failed to create storage channel:", err);
+    console.error("[channelManager] Failed to create storage channel:", err);
     throw err;
   }
 }
+

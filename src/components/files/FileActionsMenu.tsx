@@ -19,6 +19,7 @@ import {
   ArchiveRestore,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface FileActionsMenuProps {
   file: TeleFile;
@@ -54,7 +55,7 @@ export function FileActionsMenu({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 rounded-full shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800"
+          className="h-8 w-8 rounded-full shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800/80 data-[state=open]:bg-slate-100 dark:data-[state=open]:bg-slate-800/80 cursor-pointer transition-colors"
           onClick={(e) => e.stopPropagation()} // Prevent trigger select/click row
         >
           <MoreVertical className="h-4 w-4 text-slate-500 dark:text-slate-400" />
@@ -62,118 +63,130 @@ export function FileActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-52 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md"
+        className="w-48 rounded-xl p-1.5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-xl shadow-slate-100/5 dark:shadow-black/30 ring-0"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Group 1: Retrieve Actions (Preview & Download) */}
         {!isDirectory && !file.trashed && !file.archived && (
-          <DropdownMenuItem
-            onClick={() => onPreview(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <Eye className="h-4 w-4" />
-            <span>Preview</span>
-          </DropdownMenuItem>
-        )}
-        {!isDirectory && !file.trashed && !file.archived && (
-          <DropdownMenuItem
-            onClick={() => onDownload(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <Download className="h-4 w-4" />
-            <span>Download</span>
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem
+              onClick={() => onPreview(file)}
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+            >
+              <Eye className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+              <span>Preview</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onDownload(file)}
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+            >
+              <Download className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+              <span>Download</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
+          </>
         )}
 
+        {/* Group 2: Metadata Modifications (Rename, Move, Star) */}
         {!file.trashed && !file.archived && (
-          <DropdownMenuItem
-            onClick={() => onRename(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <Edit2 className="h-4 w-4" />
-            <span>Rename</span>
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem
+              onClick={() => onRename(file)}
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+            >
+              <Edit2 className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+              <span>Rename</span>
+            </DropdownMenuItem>
+            {onMoveTo && (
+              <DropdownMenuItem
+                onClick={() => onMoveTo(file)}
+                className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+              >
+                <FolderInput className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+                <span>Move to</span>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={() => onStarToggle(file)}
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+            >
+              <Star
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-colors",
+                  file.starred
+                    ? "fill-amber-400 text-amber-400"
+                    : "text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100"
+                )}
+                strokeWidth={1.75}
+              />
+              <span>{file.starred ? "Remove star" : "Add star"}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
+          </>
         )}
 
-        {onMoveTo && !file.trashed && !file.archived && (
-          <DropdownMenuItem
-            onClick={() => onMoveTo(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <FolderInput className="h-4 w-4" />
-            <span>Move to</span>
-          </DropdownMenuItem>
-        )}
-
-        {!file.trashed && !file.archived && (
-          <DropdownMenuItem
-            onClick={() => onStarToggle(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
-          >
-            <Star className={`h-4 w-4 ${file.starred ? "fill-amber-400 text-amber-400" : "text-slate-400"}`} />
-            <span>{file.starred ? "Remove star" : "Add star"}</span>
-          </DropdownMenuItem>
-        )}
-
-        {/* Archive / Unarchive */}
+        {/* Group 3: Archive Operations */}
         {!file.trashed && !file.archived && onArchive && (
           <>
-            <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
             <DropdownMenuItem
               onClick={() => onArchive(file)}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
             >
-              <Archive className="h-4 w-4 text-slate-400" />
+              <Archive className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
               <span>Archive</span>
             </DropdownMenuItem>
+            <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
           </>
         )}
         {file.archived && onUnarchive && (
-          <DropdownMenuItem
-            onClick={() => onUnarchive(file)}
-            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-brand-600 dark:text-brand-400"
-          >
-            <ArchiveRestore className="h-4 w-4" />
-            <span>Unarchive</span>
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem
+              onClick={() => onUnarchive(file)}
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+            >
+              <ArchiveRestore className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
+              <span>Unarchive</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
+          </>
         )}
 
-        {/* Trash / Restore / Delete Permanently */}
+        {/* Group 4: Trash Operations */}
         {file.trashed ? (
           <>
-            {/* --- Restore option --- */}
             <DropdownMenuItem
               onClick={() => onTrash(file)}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
               <span>Restore</span>
             </DropdownMenuItem>
-            {/* --- Delete permanently option (only visible in trash) --- */}
             {onDeletePermanently && (
               <>
-                <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
                 <DropdownMenuItem
                   onClick={() => onDeletePermanently(file)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 focus:bg-red-50 dark:focus:bg-red-950/20 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                  variant="destructive"
+                  className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
                   <span>Delete Permanently</span>
                 </DropdownMenuItem>
               </>
             )}
           </>
-        ) : !file.archived ? (
-          <>
-            <DropdownMenuSeparator className="my-1 border-t border-slate-100 dark:border-slate-800" />
+        ) : (
+          !file.archived && (
             <DropdownMenuItem
               onClick={() => onTrash(file)}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-red-50 dark:hover:bg-red-950/20 focus:bg-red-50 dark:focus:bg-red-950/20 text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+              variant="destructive"
+              className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-lg"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
               <span>Move to Trash</span>
             </DropdownMenuItem>
-          </>
-        ) : null}
+          )
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

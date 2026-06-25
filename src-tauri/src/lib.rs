@@ -58,6 +58,26 @@ fn clear_session(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Clears ONLY the session token while preserving the phone number.
+/// Used during logout so the phone-keyed channel ID can still be found on next login.
+#[tauri::command]
+fn clear_session_only(app: tauri::AppHandle) -> Result<(), String> {
+    let session_path = get_session_path(&app)?;
+    if !session_path.exists() {
+        return Ok(());
+    }
+    let contents = std::fs::read_to_string(&session_path)
+        .map_err(|e| format!("Failed to read session file: {}", e))?;
+    let mut parsed: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse session file: {}", e))?;
+    // Null out the session token but keep the phone number
+    if let Some(obj) = parsed.as_object_mut() {
+        obj.insert("session".to_string(), serde_json::Value::Null);
+    }
+    std::fs::write(&session_path, parsed.to_string())
+        .map_err(|e| format!("Failed to write session file: {}", e))
+}
+
 /// Saves a key-value pair to a vault file in the app data directory.
 #[tauri::command]
 fn save_vault_value(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
@@ -163,6 +183,7 @@ pub fn run() {
             save_session,
             load_session,
             clear_session,
+            clear_session_only,
             save_vault_value,
             load_vault_value,
             delete_vault_value,

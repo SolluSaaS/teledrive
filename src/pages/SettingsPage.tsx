@@ -54,6 +54,59 @@ export default function SettingsPage() {
     setMobileShowContent(true);
   };
 
+  // Logout state
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      // Step 1: Disconnect and destroy the GramJS client singleton first.
+      // Without this, initClient() reuses the stale session → AUTH_RESTART.
+      const { disconnectClient } = await import("@/lib/telegram/client");
+      await disconnectClient();
+
+      // Step 2: Clear the Rust session file — but KEEP the phone number.
+      //
+      // We call `clear_session_only` (not `clear_session`) so the session file
+      // becomes { session: null, phone: "+91..." }.
+      //
+      // Why keep the phone?
+      //   Channel IDs are stored in the vault under per-phone keys:
+      //     "telegram_channel_id_+918653420095"
+      //     "telegram_channel_id_+14155551234"
+      //   On the next login, bootstrapTeleDrive(phone) looks up THAT account's
+      //   channel and finds all previously uploaded files — even if a different
+      //   account was used in between.
+      //
+      // Why NOT delete channel IDs?
+      //   They are NOT credentials. Deleting them forces a dialog search on
+      //   next login where GramJS returns BigInt IDs in a different format,
+      //   causing metadataStore to fail to resolve the channel → empty drive.
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("clear_session_only").catch((e: any) =>
+        console.warn("clear_session_only failed (non-fatal):", e)
+      );
+
+      // Step 3: Also wipe the vault's secondary session backup.
+      //         Leave VAULT_KEY_PHONE and all channel ID entries intact.
+      const { deleteSecret, VAULT_KEY_SESSION } = await import("@/lib/secure/vault");
+      await deleteSecret(VAULT_KEY_SESSION).catch(() => {});
+
+      // Step 4: Reset in-memory stores
+      const { useAuthStore } = await import("@/stores/authStore");
+      const { useFileStore } = await import("@/stores/fileStore");
+      useAuthStore.getState().logout();
+      useFileStore.setState({ files: [], selectedIds: [], currentFolder: "/" });
+    } catch (err) {
+      console.error("Logout error:", err);
+    } finally {
+      setIsLoggingOut(false);
+      navigate("/auth", { replace: true });
+    }
+  };
+
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
       {/* Topbar Settings Header */}
@@ -79,8 +132,8 @@ export default function SettingsPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop Split View: Nav List */}
         {(!isMobile || !mobileShowContent) && (
-          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/20 dark:bg-slate-900/5 shrink-0 overflow-y-auto border-slate-250 dark:border-slate-800/80">
-            <div className="p-3 space-y-1.5">
+          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/20 dark:bg-slate-900/5 shrink-0 overflow-y-auto border-slate-250 dark:border-slate-800/80 flex flex-col">
+            <div className="flex-1 p-3 space-y-1.5">
               {sections.map((sec) => {
                 const Icon = sec.icon;
                 const isSelected = activeSection === sec.id;
@@ -103,6 +156,29 @@ export default function SettingsPage() {
                 );
               })}
             </div>
+
+            {/* Logout button pinned to bottom of sidebar */}
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800/80 shrink-0">
+              <button
+                onClick={() => setLogoutDialogOpen(true)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-left group cursor-pointer text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 border border-transparent hover:border-red-200 dark:hover:border-red-900/40 hover:translate-x-0.5"
+              >
+                <svg
+                  className="h-4.5 w-4.5 shrink-0 text-red-500"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                <span>Log Out</span>
+              </button>
+            </div>
           </aside>
         )}
 
@@ -115,6 +191,71 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Logout Confirmation Dialog */}
+      {logoutDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            onClick={() => !isLoggingOut && setLogoutDialogOpen(false)}
+          />
+          {/* Dialog card */}
+          <div className="relative z-10 w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in-95 duration-200">
+            {/* Icon */}
+            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/40 mx-auto mb-4">
+              <svg
+                className="h-6 w-6 text-red-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
+              </svg>
+            </div>
+
+            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 text-center mb-1.5">
+              Log Out
+            </h3>
+            <p className="text-sm text-muted-foreground text-center leading-relaxed mb-6">
+              You will be signed out of your Telegram account. Your files will remain safe in your storage channel.
+            </p>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1 rounded-xl h-10 text-sm font-semibold border-slate-200 dark:border-slate-800"
+                disabled={isLoggingOut}
+                onClick={() => setLogoutDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 rounded-xl h-10 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white border-0 shadow-sm"
+                disabled={isLoggingOut}
+                onClick={handleLogout}
+              >
+                {isLoggingOut ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    Logging out…
+                  </span>
+                ) : (
+                  "Log Out"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

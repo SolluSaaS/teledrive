@@ -4,7 +4,20 @@ export const VAULT_KEY_API_ID      = 'telegram_api_id';
 export const VAULT_KEY_API_HASH    = 'telegram_api_hash';
 export const VAULT_KEY_SESSION     = 'telegram_session';
 export const VAULT_KEY_PHONE       = 'telegram_phone';
+/** Generic channel-ID key (legacy). Prefer channelIdKey(phone) for multi-account. */
 export const VAULT_KEY_CHANNEL_ID  = 'telegram_channel_id';
+
+/**
+ * Returns the vault key for a given phone number's storage channel.
+ * E.g.  channelIdKey("+918653420095") → "telegram_channel_id_+918653420095"
+ *
+ * Normalising: trim whitespace only; keep + prefix and digits as-is.
+ * This lets each Telegram account store its own channel ID independently,
+ * so logout/login with a different number never loses another account's data.
+ */
+export function channelIdKey(phone: string): string {
+  return `${VAULT_KEY_CHANNEL_ID}_${phone.trim()}`;
+}
 
 /**
  * Mock initVault function to maintain backwards compatibility with existing callers.

@@ -70,7 +70,10 @@ function App() {
       try {
         const restored = await restoreSession();
         if (restored) {
-          await bootstrapTeleDrive(setStatus);
+          // restoreSession sets phoneNumber in the auth store — read it back
+          const { useAuthStore } = await import("./stores/authStore");
+          const phone = useAuthStore.getState().phoneNumber ?? "";
+          await bootstrapTeleDrive(setStatus, phone);
         }
       } catch (err: any) {
         console.error("Failed to restore session on app launch:", err);

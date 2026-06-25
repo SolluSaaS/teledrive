@@ -98,20 +98,13 @@ export default function StorageSection() {
           </div>
         </div>
 
-        {/* Custom progress bar */}
-        <div className="space-y-2">
-          <div className="w-full h-2 bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden relative border dark:border-slate-850/50">
-            <div className="absolute top-0 bottom-0 left-0 w-[35%] bg-gradient-to-r from-brand-500 to-indigo-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)] animate-pulse" />
-          </div>
-          
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-xs text-muted-foreground font-semibold">
-              {isRefreshing ? "Calculating…" : `${formattedSize} used`}
-            </span>
-            <span className="text-[10px] font-extrabold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 select-none uppercase tracking-wider">
-              Unlimited Storage Available
-            </span>
-          </div>
+        <div className="flex items-center justify-between text-xs pt-1 select-none">
+          <span className="text-xs text-muted-foreground font-semibold">
+            {isRefreshing ? "Calculating…" : `${formattedSize} used`}
+          </span>
+          <span className="text-[10px] font-extrabold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 select-none uppercase tracking-wider">
+            Unlimited Storage Available
+          </span>
         </div>
 
         <Separator />

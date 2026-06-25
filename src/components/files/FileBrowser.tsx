@@ -60,6 +60,73 @@ function formatFileSize(bytes: unknown): string {
   return `${parseFloat((n / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
+// ---------------------------------------------------------------------------
+// Utility: human-readable file type
+// ---------------------------------------------------------------------------
+function getFileType(file: TeleFile): string {
+  const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
+  if (isDir) return "Folder";
+  
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "pdf": return "PDF Document";
+    case "jpg":
+    case "jpeg":
+    case "png":
+    case "webp":
+    case "gif":
+    case "svg":
+      return "Image";
+    case "mp4":
+    case "mkv":
+    case "mov":
+    case "avi":
+    case "webm":
+      return "Video";
+    case "mp3":
+    case "wav":
+    case "m4a":
+    case "ogg":
+    case "flac":
+      return "Audio";
+    case "txt":
+    case "md":
+    case "rtf":
+      return "Text Document";
+    case "zip":
+    case "tar":
+    case "gz":
+    case "rar":
+    case "7z":
+      return "Archive";
+    case "doc":
+    case "docx":
+      return "Word Document";
+    case "xls":
+    case "xlsx":
+    case "csv":
+      return "Spreadsheet";
+    case "ppt":
+    case "pptx":
+      return "Presentation";
+    case "html":
+    case "css":
+    case "js":
+    case "ts":
+    case "tsx":
+    case "json":
+    case "py":
+    case "rs":
+    case "go":
+    case "c":
+    case "cpp":
+      return "Source Code";
+    default:
+      return ext ? `${ext.toUpperCase()} File` : "File";
+  }
+}
+
+
 interface FileBrowserProps {
   folderPath?: string;
   mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived";
@@ -695,19 +762,19 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
                         className={cn(
-                          "group relative flex items-center justify-between p-3.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none",
+                          "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none",
                           isSelected
                             ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
                             : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40"
                         )}
                       >
-                        <div className="flex items-center gap-3 min-w-0 pr-6">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                             {folder.name}
                           </span>
                         </div>
-                        <div className="absolute right-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
                           <FileActionsMenu
                             file={folder}
                             onPreview={toastPreview}
@@ -772,16 +839,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         </div>
 
                         {/* Lower text & action menu info */}
-                        <div className="p-3 flex items-center justify-between gap-2 bg-white dark:bg-slate-900">
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate pr-1">
+                        <div className="p-3 pr-2 relative bg-white dark:bg-slate-900 flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                               {file.name}
                             </p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">
                               {formatFileSize(file.size)}
                             </p>
                           </div>
-                          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                             <FileActionsMenu
                               file={file}
                               onPreview={toastPreview}
@@ -805,11 +872,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900/40">
+        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 shadow-xs">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-100 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider">
-                <th className="py-3 px-4 w-12 text-center">
+              <tr className="border-b border-slate-150 dark:border-slate-800 text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider select-none bg-slate-50/50 dark:bg-slate-950/20">
+                <th className="py-3.5 px-4 w-12 text-center">
                   <input
                     type="checkbox"
                     checked={selectedIds.length === displayFiles.length && displayFiles.length > 0}
@@ -820,14 +887,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         clearSelection();
                       }
                     }}
-                    className="rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500"
+                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500/30 dark:bg-slate-950 transition-colors cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-4">Name</th>
-                <th className="py-3 px-4 hidden sm:table-cell">Storage Channel ID</th>
-                <th className="py-3 px-4 hidden md:table-cell">Size</th>
-                <th className="py-3 px-4 hidden lg:table-cell">Uploaded Date</th>
-                <th className="py-3 px-4 w-16"></th>
+                <th className="py-3.5 px-4 font-extrabold">Name</th>
+                <th className="py-3.5 px-4 hidden sm:table-cell font-extrabold">Type</th>
+                <th className="py-3.5 px-4 hidden md:table-cell font-extrabold">Size</th>
+                <th className="py-3.5 px-4 hidden lg:table-cell font-extrabold">Last Modified</th>
+                <th className="py-3.5 px-4 w-16"></th>
               </tr>
             </thead>
             <tbody>
@@ -855,37 +922,37 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onTouchEnd={handleTouchEndItem}
                       onTouchMove={handleTouchEndItem}
                       className={cn(
-                        "group border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-900/30 cursor-pointer transition-colors duration-150",
+                        "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150",
                         isSelected && "bg-brand-50/40 dark:bg-brand-950/15"
                       )}
                     >
-                      <td className="py-2.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(file.id)}
-                          className="rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500"
+                          className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500/30 dark:bg-slate-950 transition-colors cursor-pointer"
                         />
                       </td>
-                      <td className="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
-                        <div className="flex items-center gap-2.5">
-                          <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent" />
+                      <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
+                        <div className="flex items-center gap-3">
+                          <FileIcon name={file.name} mime={file.mime} size="sm" className="shrink-0" />
                           <span className="truncate max-w-[200px] sm:max-w-xs">{file.name}</span>
                           {file.starred && (
-                            <Star className="h-3 w-3 fill-amber-400 text-amber-400 shrink-0" />
+                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0 ml-0.5" />
                           )}
                         </div>
                       </td>
-                      <td className="py-2.5 px-4 hidden sm:table-cell text-[10px] text-muted-foreground truncate max-w-[120px] font-mono">
-                        {file.channelId}
+                      <td className="py-3 px-4 hidden sm:table-cell text-xs text-slate-550 dark:text-slate-400">
+                        {getFileType(file)}
                       </td>
-                      <td className="py-2.5 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400">
+                      <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400">
                         {isDir ? "—" : formatFileSize(file.size)}
                       </td>
-                      <td className="py-2.5 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400">
+                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400">
                         {new Date(file.uploadedAt).toLocaleDateString()}
                       </td>
-                      <td className="py-2.5 px-4 text-center">
+                      <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <FileActionsMenu
                           file={file}
                           onPreview={toastPreview}

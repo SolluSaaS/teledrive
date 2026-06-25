@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useFileStore } from "@/stores/fileStore";
 import { fuzzySearch } from "@/lib/search/searchEngine";
@@ -51,22 +50,22 @@ export default function SearchBar() {
     <div className="relative w-full">
       <form
         onSubmit={handleSubmit}
-        className={`relative flex items-center w-full h-11 transition-all duration-200 rounded-full px-4 border ${
+        className={`relative flex items-center w-full h-10 transition-all duration-200 rounded-full px-4 border ${
           isFocused
-            ? "bg-white dark:bg-slate-900 border-brand-500 shadow-md ring-1 ring-brand-500"
-            : "bg-slate-100 dark:bg-slate-900 border-transparent hover:bg-slate-200/60 dark:hover:bg-slate-800/80"
+            ? "bg-white dark:bg-slate-950 border-brand-500 shadow-md ring-2 ring-brand-500/15"
+            : "bg-slate-100 border-slate-200/60 dark:bg-slate-900/70 dark:border-slate-800/80 hover:bg-slate-200/60 dark:hover:bg-slate-900/90 hover:border-slate-300 dark:hover:border-slate-700/80 shadow-xs"
         }`}
       >
-        <Search className="h-4.5 w-4.5 text-slate-500 dark:text-slate-400 mr-2.5 shrink-0" />
+        <Search className="h-4.5 w-4.5 text-slate-550 dark:text-slate-400 mr-2.5 shrink-0" />
         
-        <Input
+        <input
           type="text"
           placeholder="Search in TeleDrive"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)} // short delay to allow clicks to register
-          className="w-full h-full bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-0 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+          className="w-full h-full bg-transparent border-0 outline-none focus:outline-none focus:ring-0 px-0 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-450 dark:placeholder:text-slate-400/70"
         />
 
         {query && (

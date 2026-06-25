@@ -13,13 +13,14 @@ import { TeleFile } from "../types";
  * and re-indexes them under "/" so they become visible.
  */
 export async function bootstrapTeleDrive(
-  onStatusChange?: (status: string) => void
+  onStatusChange?: (status: string) => void,
+  phone: string = ""
 ): Promise<string> {
   onStatusChange?.("Connecting to Telegram...");
   const client = getClient();
 
   onStatusChange?.("Verifying secure storage channel...");
-  const channelId = await ensureStorageChannel();
+  const channelId = await ensureStorageChannel(phone);
 
   onStatusChange?.("Loading file metadata index...");
   let files = await loadIndex(channelId);

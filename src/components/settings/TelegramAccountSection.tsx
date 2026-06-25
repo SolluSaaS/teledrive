@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { LinkIcon, Smartphone, Database } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
-import { deleteSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_CHANNEL_ID } from "@/lib/secure/vault";
+import { deleteSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_CHANNEL_ID, channelIdKey } from "@/lib/secure/vault";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -20,25 +20,40 @@ export default function TelegramAccountSection() {
 
   useEffect(() => {
     async function loadChannel() {
-      const savedChannel = await getSecret(VAULT_KEY_CHANNEL_ID);
+      if (!phoneNumber) return;
+      const phoneKey = channelIdKey(phoneNumber);
+      let savedChannel = await getSecret(phoneKey);
+      if (!savedChannel) {
+        savedChannel = await getSecret(VAULT_KEY_CHANNEL_ID);
+      }
       if (savedChannel) {
         setChannelId(savedChannel);
       }
     }
-    if (isAuthenticated) {
+    if (isAuthenticated && phoneNumber) {
       loadChannel();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, phoneNumber]);
 
   const handleDisconnect = async () => {
     try {
-      // Clear the primary file-backed session store
-      await invoke("clear_session").catch(() => {});
-      // Also clear Stronghold vault secrets (best-effort)
+      // Step 1: Disconnect and destroy the GramJS client singleton first
+      const { disconnectClient } = await import("@/lib/telegram/client");
+      await disconnectClient();
+
+      // Step 2: Clear Rust session file (preserve phone number)
+      await invoke("clear_session_only").catch((e: any) =>
+        console.warn("clear_session_only failed:", e)
+      );
+
+      // Step 3: Clear session secret in vault
       await deleteSecret(VAULT_KEY_SESSION).catch(() => {});
-      await deleteSecret(VAULT_KEY_PHONE).catch(() => {});
-      await deleteSecret(VAULT_KEY_CHANNEL_ID).catch(() => {});
+
+      // Step 4: Reset auth/file stores
       logout();
+      const { useFileStore } = await import("@/stores/fileStore");
+      useFileStore.setState({ files: [], selectedIds: [], currentFolder: "/" });
+
       toast.success("Disconnected Telegram account successfully.");
       navigate("/auth");
     } catch (err) {
@@ -165,7 +180,10 @@ export default function TelegramAccountSection() {
               onClick={async () => {
                 setIsDialogOpen(false);
                 try {
-                  await deleteSecret(VAULT_KEY_CHANNEL_ID);
+                  if (phoneNumber) {
+                    await deleteSecret(channelIdKey(phoneNumber)).catch(() => {});
+                  }
+                  await deleteSecret(VAULT_KEY_CHANNEL_ID).catch(() => {});
                   setChannelId(null);
                   toast.success("Storage channel reset. Restart the app to re-map it.");
                 } catch (err) {
