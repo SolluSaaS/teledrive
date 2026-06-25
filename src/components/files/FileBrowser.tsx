@@ -46,6 +46,18 @@ import {
 } from "@/components/ui/dialog";
 import { fuzzySearch } from "@/lib/search/searchEngine";
 
+// ---------------------------------------------------------------------------
+// Utility: human-readable file size
+// ---------------------------------------------------------------------------
+function formatFileSize(bytes: unknown): string {
+  const n = Number(bytes);
+  if (!n || !isFinite(n) || n <= 0) return "—";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(k)), sizes.length - 1);
+  return `${parseFloat((n / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
 interface FileBrowserProps {
   folderPath?: string;
   mode?: "drive" | "starred" | "recent" | "trash" | "search";
@@ -782,7 +794,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                               {file.name}
                             </p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {(file.size / (1024 * 1024)).toFixed(2)} MB
+                              {formatFileSize(file.size)}
                             </p>
                           </div>
                           <div onClick={(e) => e.stopPropagation()} className="shrink-0">
@@ -878,7 +890,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         {file.channelId}
                       </td>
                       <td className="py-2.5 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400">
-                        {isDir ? "—" : `${(file.size / (1024 * 1024)).toFixed(2)} MB`}
+                        {isDir ? "—" : formatFileSize(file.size)}
                       </td>
                       <td className="py-2.5 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400">
                         {new Date(file.uploadedAt).toLocaleDateString()}
@@ -1044,7 +1056,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     <p className="text-[10px] text-muted-foreground">
                       {mobileContextFile.mime === "inode/directory" || mobileContextFile.mime === "application/x-directory"
                         ? "Folder"
-                        : `${(mobileContextFile.size / (1024 * 1024)).toFixed(2)} MB`}
+                        : formatFileSize(mobileContextFile.size)}
                     </p>
                   </div>
                 </div>

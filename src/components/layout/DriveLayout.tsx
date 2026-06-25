@@ -219,14 +219,20 @@ export default function DriveLayout() {
 
   const files = useFileStore((state) => state.files);
 
-  // Calculate actual storage size based on files in store
-  const totalSizeBytes = files.reduce((acc, f) => acc + (f.size || 0), 0);
-  
+  // Only sum active (non-trashed) file sizes; guard against NaN from BigInt
+  const safeSize = (raw: unknown): number => {
+    const n = Number(raw);
+    return isFinite(n) && n >= 0 ? n : 0;
+  };
+  const totalSizeBytes = files
+    .filter((f) => !f.trashed && f.mime !== "inode/directory")
+    .reduce((acc, f) => acc + safeSize(f.size), 0);
+
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
+    if (!bytes || !isFinite(bytes) || bytes <= 0) return "0 Bytes";
     const k = 1024;
     const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
