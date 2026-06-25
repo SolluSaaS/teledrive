@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { X, Download, Loader2, FileIcon as FallbackIcon } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/downloader";
-import { updateFile } from "@/lib/storage/metadataStore";
+import { updateFileLocal } from "@/lib/storage/metadataStore";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
@@ -20,20 +20,17 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [markdownHtml, setMarkdownHtml] = useState<string | null>(null);
 
-  // Update lastOpenedAt on Telegram channel index when file is previewed
+  // Update lastOpenedAt in local store only (no Telegram write).
+  // Writing to Telegram on every preview open caused duplication because
+  // saveIndex deletes+recreates pinned messages, and loadIndex then
+  // concatenated multiple copies.
   useEffect(() => {
     if (file) {
-      const markAsOpened = async () => {
-        try {
-          const updatedFiles = await updateFile(file.channelId, file.id, {
-            lastOpenedAt: Date.now(),
-          });
-          useFileStore.getState().setFiles(updatedFiles);
-        } catch (e) {
-          console.warn("Failed to update lastOpenedAt metadata:", e);
-        }
-      };
-      markAsOpened();
+      const store = useFileStore.getState();
+      const updatedFiles = updateFileLocal(store.files, file.id, {
+        lastOpenedAt: Date.now(),
+      });
+      store.setFiles(updatedFiles);
     }
   }, [file]);
 

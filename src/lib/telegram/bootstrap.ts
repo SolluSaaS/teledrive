@@ -9,10 +9,9 @@ import { TeleFile } from "../types";
  * Bootstraps TeleDrive storage channel and loads the metadata.
  * Reports status changes to the caller.
  *
- * Also performs an orphan-recovery scan:
- * If file documents exist in the storage channel that are NOT in the
- * metadata index (e.g. because a previous index-save failed), they are
- * re-indexed in the root "/" folder so they become visible.
+ * Orphan recovery: scans the last 200 channel messages for uploaded documents
+ * that are NOT in the metadata index (e.g. because a previous index-save failed)
+ * and re-indexes them under "/" so they become visible.
  */
 export async function bootstrapTeleDrive(
   onStatusChange?: (status: string) => void
@@ -27,61 +26,50 @@ export async function bootstrapTeleDrive(
   let files = await loadIndex(channelId);
 
   // -----------------------------------------------------------------------
-  // Orphan recovery: scan the last 200 channel messages for uploaded
-  // documents that are NOT in the index and add them back.
+  // Orphan recovery: find document messages not in the current index.
+  // Uses Number() coercion to handle both plain-number and BigInt msg.id.
   // -----------------------------------------------------------------------
-  onStatusChange?.("Scanning for any orphaned files...");
+  onStatusChange?.("Scanning for orphaned files...");
   try {
     const peer = await client.getEntity(channelId);
     const recentMessages = await client.getMessages(peer, { limit: 200 });
 
-    // The set of messageIDs already indexed
-    const indexedMsgIds = new Set(files.map((f) => f.messageId));
+    // Build a Set of already-indexed message IDs (normalised to number)
+    const indexedMsgIds = new Set(files.map((f) => Number(f.messageId)));
 
     const orphans: TeleFile[] = [];
 
     for (const msg of recentMessages) {
-      // Skip index messages and system messages
-      if (!msg || !msg.id) continue;
-      if (msg.text && msg.text.includes("teledrive_index")) continue;
+      if (!msg?.id) continue;
+      // Skip text-only index messages
+      if (msg.text?.includes("teledrive_index")) continue;
 
-      // Only care about document / media messages
+      const msgId = Number(msg.id);
+
+      // Skip if already in the index
+      if (indexedMsgIds.has(msgId)) continue;
+
+      // Only care about document media (uploaded files)
       const media = (msg as any).media;
-      if (!media) continue;
+      if (!media?.document) continue;
 
-      const doc =
-        media.document ||          // MessageMediaDocument
-        media.photo ||             // MessageMediaPhoto (rare in a broadcast channel)
-        null;
+      const doc = media.document;
+      let name = msg.text?.trim() || "Untitled";
+      let mimeType: string = doc.mimeType || "application/octet-stream";
+      let size: number = Number(doc.size) || 0;
 
-      if (!doc) continue;
-      if (indexedMsgIds.has(msg.id)) continue; // Already indexed
-
-      // Try to read the file name from the caption or document attributes
-      let name = msg.text || "Untitled";
-      let mimeType = "application/octet-stream";
-      let size = 0;
-
-      if (media.document) {
-        size = media.document.size || 0;
-        mimeType = media.document.mimeType || "application/octet-stream";
-        const filenameAttr = (media.document.attributes || []).find(
-          (a: any) => a.className === "DocumentAttributeFilename"
-        );
-        if (filenameAttr?.fileName) {
-          name = filenameAttr.fileName;
-        } else if (msg.text && msg.text.trim()) {
-          name = msg.text.trim();
-        }
-      }
+      const filenameAttr = (doc.attributes || []).find(
+        (a: any) => a.className === "DocumentAttributeFilename"
+      );
+      if (filenameAttr?.fileName) name = filenameAttr.fileName;
 
       orphans.push({
-        id: `recovered_${msg.id}`,
+        id: `recovered_${msgId}`,
         name,
         size,
         mime: mimeType,
-        folderPath: "/",          // Place in root; user can organise later
-        messageId: msg.id,
+        folderPath: "/",
+        messageId: msgId,
         channelId,
         uploadedAt: (msg.date || 0) * 1000,
         starred: false,
@@ -90,13 +78,14 @@ export async function bootstrapTeleDrive(
     }
 
     if (orphans.length > 0) {
-      console.log(`[bootstrap] Recovering ${orphans.length} orphaned file(s)…`);
-      // Merge orphans with existing index (avoid duplicates by messageId)
-      const existingMsgIds = new Set(files.map((f) => f.messageId));
-      const newOrphans = orphans.filter((o) => !existingMsgIds.has(o.messageId));
+      // Deduplicate orphans against existing files by messageId
+      const existingMsgIds = new Set(files.map((f) => Number(f.messageId)));
+      const newOrphans = orphans.filter((o) => !existingMsgIds.has(Number(o.messageId)));
+
       if (newOrphans.length > 0) {
+        console.log(`[bootstrap] Recovering ${newOrphans.length} orphaned file(s)…`);
         files = [...files, ...newOrphans];
-        // Persist the recovered entries
+        // Persist the recovered entries (saveIndex will clean up duplicates first)
         await saveIndex(channelId, files);
       }
     }
@@ -105,8 +94,20 @@ export async function bootstrapTeleDrive(
     console.warn("[bootstrap] Orphan scan failed (non-fatal):", scanErr);
   }
 
+  // Always re-save the index on boot to:
+  // 1. Clean up any duplicate/stale pinned messages that accumulated from previous failures
+  // 2. Ensure the current file list is authoritative in Telegram
+  // saveIndex deletes ALL old index messages first, then writes exactly one clean set.
+  try {
+    onStatusChange?.("Cleaning up index...");
+    await saveIndex(channelId, files);
+  } catch (cleanupErr) {
+    console.warn("[bootstrap] Could not rewrite index during cleanup:", cleanupErr);
+  }
+
   onStatusChange?.("Initializing local storage view...");
   useFileStore.getState().setFiles(files);
 
   return channelId;
 }
+

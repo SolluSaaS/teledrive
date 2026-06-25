@@ -6,61 +6,24 @@ import { TeleFile } from "../types";
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve a channel-ID string to a GramJS entity that can be passed to APIs.
- * Handles both "-100XXXX" (Bot-API format) and plain XXXX formats.
- */
 async function resolveChannelPeer(channelId: string) {
   const client = getClient();
   return client.getEntity(channelId);
 }
 
-/**
- * Sends a text message and attempts to pin it.
- * Pinning is treated as best-effort — if Telegram rejects it, we keep the
- * message unread and `loadIndex` will still find it via full-message scan.
- */
-async function sendAndPin(
-  channelId: string,
-  peer: any,
-  text: string
-): Promise<number> {
-  const client = getClient();
-  const result = await client.sendMessage(peer, { message: text });
-
-  try {
-    await client.invoke(
-      new Api.messages.UpdatePinnedMessage({
-        peer,
-        id: result.id,
-        unpin: false,
-        silent: true,
-      })
-    );
-  } catch (pinErr: any) {
-    // Non-fatal: message still exists and loadIndex can find it via scan
-    console.warn(
-      `[metadataStore] Could not pin index message (id=${result.id}):`,
-      pinErr?.message || pinErr
-    );
-  }
-
-  return result.id;
-}
-
 // ---------------------------------------------------------------------------
-// loadIndex — primary + fallback scan
+// loadIndex
 // ---------------------------------------------------------------------------
 
 /**
- * Loads the virtual file metadata index.
+ * Loads the virtual file metadata index from the Telegram channel.
  *
- * Strategy:
- * 1. Try pinned messages (fast path for the normal case).
- * 2. If none found, scan the last 200 channel messages (handles the case
- *    where pin was blocked by Telegram's new-channel restriction).
+ * Reads ALL pinned messages that look like teledrive_index entries,
+ * merges their file arrays, then deduplicates by `id` (keeping the latest
+ * entry per id) so that duplicate/stale pinned messages never show ghost files.
  *
- * This makes the index resilient to pinning failures.
+ * Falls back to scanning the last 200 messages if no pinned index is found
+ * (handles the case where the pin was blocked by Telegram's new-channel lock).
  */
 export async function loadIndex(channelId: string): Promise<TeleFile[]> {
   const client = getClient();
@@ -73,23 +36,26 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
     throw err;
   }
 
-  const parseIndexMessages = (messages: any[]): TeleFile[] => {
+  const parseAndDedup = (messages: any[]): TeleFile[] => {
     const indexMsgs = messages
-      .filter((m) => m.text && m.text.includes("teledrive_index"))
+      .filter((m) => m?.text?.includes("teledrive_index"))
       .sort((a: any, b: any) => a.id - b.id);
 
-    let allFiles: TeleFile[] = [];
+    // Merge all chunks into one map, keyed by file.id — last write wins.
+    const byId = new Map<string, TeleFile>();
     for (const msg of indexMsgs) {
       try {
         const data = JSON.parse(msg.text || "");
         if (data && Array.isArray(data.files)) {
-          allFiles = allFiles.concat(data.files);
+          for (const f of data.files) {
+            if (f?.id) byId.set(f.id, f);
+          }
         }
       } catch (e) {
         console.warn(`[metadataStore] Failed to parse index msg ${msg.id}:`, e);
       }
     }
-    return allFiles;
+    return Array.from(byId.values());
   };
 
   // --- Step 1: pinned messages ---
@@ -98,9 +64,9 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       filter: new Api.InputMessagesFilterPinned(),
       limit: 100,
     });
-    const files = parseIndexMessages(pinned);
-    if (files.length > 0 || pinned.some((m: any) => m.text?.includes("teledrive_index"))) {
-      return files;
+    const hasPinnedIndex = pinned.some((m: any) => m?.text?.includes("teledrive_index"));
+    if (hasPinnedIndex) {
+      return parseAndDedup(pinned);
     }
   } catch (pinnedErr) {
     console.warn("[metadataStore] Failed to load pinned messages, falling back to scan:", pinnedErr);
@@ -109,7 +75,7 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
   // --- Step 2: full scan of recent messages ---
   try {
     const recent = await client.getMessages(peer, { limit: 200 });
-    return parseIndexMessages(recent);
+    return parseAndDedup(recent);
   } catch (scanErr) {
     console.error("[metadataStore] Failed to scan channel messages:", scanErr);
     return [];
@@ -117,16 +83,19 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
 }
 
 // ---------------------------------------------------------------------------
-// saveIndex — with EDIT_MESSAGE_TEMP_RESTRICTED fallback
+// saveIndex — nuclear rewrite strategy: delete all old index msgs, send fresh
 // ---------------------------------------------------------------------------
 
 /**
- * Saves the virtual file metadata index to the Telegram channel.
+ * Saves the virtual file metadata index.
  *
- * Handles:
- * - EDIT_MESSAGE_TEMP_RESTRICTED: unpin + delete old msg → send fresh one + pin
- * - MESSAGE_NOT_MODIFIED: skip (identical content)
- * - Pin failures: non-fatal, loadIndex will fall back to full scan
+ * Strategy: DELETE all existing index messages first, then send fresh ones.
+ * This is the only reliable approach when:
+ *   - EDIT_MESSAGE_TEMP_RESTRICTED blocks edits
+ *   - Previous failed saves left duplicate pinned messages
+ *
+ * Pinning is best-effort (non-fatal). loadIndex falls back to a scan if
+ * the pinned messages aren't available.
  */
 export async function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
   const client = getClient();
@@ -139,22 +108,49 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     throw err;
   }
 
-  // 1. Fetch current pinned index messages
-  let currentIndexMessages: any[] = [];
+  // 1. Find ALL existing index messages (pinned or not) and delete them.
+  //    This prevents duplicates from accumulating.
+  let oldIndexMsgIds: number[] = [];
   try {
+    // Check pinned messages
     const pinned = await client.getMessages(peer, {
       filter: new Api.InputMessagesFilterPinned(),
       limit: 100,
     });
-    currentIndexMessages = pinned
-      .filter((m: any) => m.text && m.text.includes("teledrive_index"))
-      .sort((a: any, b: any) => a.id - b.id);
+    const fromPinned = pinned
+      .filter((m: any) => m?.text?.includes("teledrive_index"))
+      .map((m: any) => m.id);
+
+    // Also check recent messages in case some aren't pinned
+    const recent = await client.getMessages(peer, { limit: 200 });
+    const fromRecent = recent
+      .filter((m: any) => m?.text?.includes("teledrive_index"))
+      .map((m: any) => m.id);
+
+    // Union of both sets
+    oldIndexMsgIds = [...new Set([...fromPinned, ...fromRecent])];
   } catch (err) {
-    // If we can't load pinned messages, we'll just send new ones
-    console.warn("[metadataStore] Could not load pinned index messages:", err);
+    console.warn("[metadataStore] Could not enumerate old index messages:", err);
   }
 
-  // 2. Chunk files into ≤15 per chunk to stay well under 4096-char message limit
+  // Unpin and delete all old index messages
+  for (const msgId of oldIndexMsgIds) {
+    try {
+      await client.invoke(
+        new Api.messages.UpdatePinnedMessage({
+          peer,
+          id: msgId,
+          unpin: true,
+          silent: true,
+        })
+      );
+    } catch (_) { /* ignore */ }
+    try {
+      await client.deleteMessages(peer, [msgId], { revoke: true });
+    } catch (_) { /* ignore */ }
+  }
+
+  // 2. Chunk files (≤15 files per chunk to stay under 4096 chars)
   const CHUNK_SIZE = 15;
   const chunks: TeleFile[][] = [];
   for (let i = 0; i < files.length; i += CHUNK_SIZE) {
@@ -162,7 +158,7 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
   }
   if (chunks.length === 0) chunks.push([]);
 
-  // 3. Write / edit / fallback-resend each chunk
+  // 3. Send fresh index messages and try to pin each
   for (let i = 0; i < chunks.length; i++) {
     const payload = {
       teledrive_index: true,
@@ -173,85 +169,47 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     };
     const text = JSON.stringify(payload);
 
-    if (i < currentIndexMessages.length) {
-      const msg = currentIndexMessages[i];
+    try {
+      const result = await client.sendMessage(peer, { message: text });
 
-      try {
-        await client.editMessage(peer, { message: msg.id, text });
-      } catch (editErr: any) {
-        const errMsg: string = editErr?.message || "";
-
-        if (errMsg.includes("MESSAGE_NOT_MODIFIED")) {
-          // Identical content — nothing to do
-          continue;
-        }
-
-        if (errMsg.includes("EDIT_MESSAGE_TEMP_RESTRICTED")) {
-          // Telegram restricts editing in newly-created channels.
-          // Fallback: remove old msg, send a fresh one, try to pin it.
-          console.warn(
-            `[metadataStore] EDIT_MESSAGE_TEMP_RESTRICTED for msg ${msg.id}. Falling back to delete+resend.`
-          );
-          try {
-            await client.invoke(
-              new Api.messages.UpdatePinnedMessage({
-                peer,
-                id: msg.id,
-                unpin: true,
-                silent: true,
-              })
-            );
-          } catch (_) { /* ignore */ }
-
-          try {
-            await client.deleteMessages(peer, [msg.id], { revoke: true });
-          } catch (_) { /* ignore */ }
-
-          await sendAndPin(channelId, peer, text);
-        } else {
-          throw editErr; // Re-throw unexpected errors
-        }
-      }
-    } else {
-      // Send a new index message and try to pin it
-      await sendAndPin(channelId, peer, text);
-    }
-  }
-
-  // 4. Clean up extra old index messages (if file count dropped below previous chunk count)
-  if (currentIndexMessages.length > chunks.length) {
-    const extras = currentIndexMessages.slice(chunks.length);
-    for (const msg of extras) {
+      // Pin best-effort
       try {
         await client.invoke(
           new Api.messages.UpdatePinnedMessage({
             peer,
-            id: msg.id,
-            unpin: true,
+            id: result.id,
+            unpin: false,
             silent: true,
           })
         );
-        await client.deleteMessages(peer, [msg.id], { revoke: true });
-      } catch (e) {
-        console.warn(`[metadataStore] Failed to clean up extra index msg ${msg.id}:`, e);
+      } catch (pinErr: any) {
+        console.warn(
+          `[metadataStore] Could not pin index chunk ${i} (id=${result.id}):`,
+          pinErr?.message || pinErr
+        );
+        // Non-fatal: loadIndex will find it via full scan
       }
+    } catch (sendErr) {
+      console.error(`[metadataStore] Failed to send index chunk ${i}:`, sendErr);
+      throw sendErr;
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Public CRUD helpers
+// Public CRUD helpers — all deduplicate by id before writing
 // ---------------------------------------------------------------------------
 
-/** Adds a file virtual entry to the index. */
+/** Adds a file entry to the index (replaces if same id already exists). */
 export async function addFile(channelId: string, file: TeleFile): Promise<TeleFile[]> {
   const files = await loadIndex(channelId);
+  // Replace existing entry with same id, or append
   const updatedFiles = [...files.filter((f) => f.id !== file.id), file];
   await saveIndex(channelId, updatedFiles);
   return updatedFiles;
 }
 
-/** Removes a file virtual entry from the index by ID. */
+/** Removes a file entry from the index by id. */
 export async function removeFile(channelId: string, fileId: string): Promise<TeleFile[]> {
   const files = await loadIndex(channelId);
   const updatedFiles = files.filter((f) => f.id !== fileId);
@@ -259,7 +217,14 @@ export async function removeFile(channelId: string, fileId: string): Promise<Tel
   return updatedFiles;
 }
 
-/** Updates a file virtual entry in the index. */
+/**
+ * Updates a file entry in the index.
+ * Returns the updated file list but does NOT write to Telegram —
+ * call saveIndex explicitly if you need to persist the update remotely.
+ *
+ * For non-critical updates (e.g. lastOpenedAt), use updateFileLocal to
+ * avoid triggering a full Telegram round-trip on every preview open.
+ */
 export async function updateFile(
   channelId: string,
   fileId: string,
@@ -271,4 +236,18 @@ export async function updateFile(
   );
   await saveIndex(channelId, updatedFiles);
   return updatedFiles;
+}
+
+/**
+ * Updates a file entry IN MEMORY ONLY — no Telegram write.
+ * Use for non-critical metadata (e.g. lastOpenedAt) that should not
+ * trigger a full index round-trip.
+ * Returns the new file list so the caller can update the local store.
+ */
+export function updateFileLocal(
+  files: TeleFile[],
+  fileId: string,
+  patch: Partial<TeleFile>
+): TeleFile[] {
+  return files.map((f) => (f.id === fileId ? { ...f, ...patch } : f));
 }
