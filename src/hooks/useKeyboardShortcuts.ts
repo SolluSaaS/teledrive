@@ -77,12 +77,10 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
             const event = new CustomEvent("teledrive-delete-selected");
             window.dispatchEvent(event);
           } else {
-            const confirmTrash = window.confirm(`Move ${selectedIds.length} items to trash?`);
-            if (confirmTrash) {
-              const filesToTrash = files.filter((f) => selectedIds.includes(f.id));
-              filesToTrash.forEach((file) => moveToTrash(file));
-              clearSelection();
-            }
+            // Move to trash (reversible — no confirmation needed)
+            const filesToTrash = files.filter((f) => selectedIds.includes(f.id));
+            filesToTrash.forEach((file) => moveToTrash(file));
+            clearSelection();
           }
         }
         return;

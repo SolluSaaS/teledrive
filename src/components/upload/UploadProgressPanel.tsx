@@ -72,11 +72,6 @@ export function UploadProgressPanel() {
   const overallProgressPercent = Math.round(totalProgress / totalCount);
 
   const handleClose = () => {
-    if (!isAllFinished) {
-      if (!window.confirm("Active uploads are still running. Closing this panel will not cancel them, but you won't see their progress. Close anyway?")) {
-        return;
-      }
-    }
     setIsVisible(false);
     clearQueue();
   };

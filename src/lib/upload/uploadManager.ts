@@ -1,4 +1,70 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID } from "../secure/vault";
+
+// ---------------------------------------------------------------------------
+// MIME type inference from file extension
+// Used when the OS/browser does not provide a MIME type (e.g. Tauri native pick)
+// ---------------------------------------------------------------------------
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  // Images
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+  bmp: "image/bmp", webp: "image/webp", svg: "image/svg+xml", tiff: "image/tiff",
+  tif: "image/tiff", heic: "image/heic", heif: "image/heif", ico: "image/x-icon",
+  psd: "image/vnd.adobe.photoshop", ai: "application/postscript",
+
+  // Videos
+  mp4: "video/mp4", mkv: "video/x-matroska", avi: "video/x-msvideo",
+  mov: "video/quicktime", wmv: "video/x-ms-wmv", flv: "video/x-flv",
+  webm: "video/webm", m4v: "video/x-m4v", "3gp": "video/3gpp",
+  mpeg: "video/mpeg", mpg: "video/mpeg",
+
+  // Audio
+  mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",
+  flac: "audio/flac", aac: "audio/aac", wma: "audio/x-ms-wma", opus: "audio/opus",
+  amr: "audio/amr",
+
+  // Documents
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  epub: "application/epub+zip",
+  pages: "application/vnd.apple.pages",
+  numbers: "application/vnd.apple.numbers",
+  key: "application/vnd.apple.keynote",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  rtf: "application/rtf",
+
+  // Code / Text
+  html: "text/html", htm: "text/html", css: "text/css",
+  js: "text/javascript", ts: "text/typescript", jsx: "text/javascript",
+  tsx: "text/typescript", json: "application/json", xml: "application/xml",
+  yaml: "text/yaml", yml: "text/yaml",
+  py: "text/x-python", go: "text/x-go", rs: "text/x-rust",
+  c: "text/x-c", cpp: "text/x-c++", h: "text/x-c", cs: "text/x-csharp",
+  java: "text/x-java-source", rb: "text/x-ruby", sh: "application/x-sh",
+  bat: "application/x-bat", ps1: "application/x-powershell",
+  sql: "application/sql", ini: "text/plain", conf: "text/plain",
+
+  // Archives
+  zip: "application/zip", rar: "application/vnd.rar",
+  "7z": "application/x-7z-compressed", tar: "application/x-tar",
+  gz: "application/gzip", bz2: "application/x-bzip2",
+  xz: "application/x-xz", iso: "application/x-iso9660-image",
+  dmg: "application/x-apple-diskimage",
+};
+
+function getMimeFromExtension(fileName: string): string {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return EXTENSION_MIME_MAP[ext] ?? "application/octet-stream";
+}
 import { uploadFileToTelegram } from "../telegram/uploader";
 import { addFile } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
@@ -99,17 +165,21 @@ export async function processQueue(): Promise<void> {
             }
           );
 
-          // Build the metadata entry
-          const mimeType =
+          // Build the metadata entry.
+          // Priority: file.type (browser/OS) → getMimeFromExtension (extension lookup) → fallback
+          const rawMime =
             item.file instanceof File
               ? item.file.type
-              : (item.file as any)?.type || "application/octet-stream";
+              : (item.file as any)?.type ?? "";
+          const mimeType = rawMime && rawMime !== "application/octet-stream"
+            ? rawMime
+            : getMimeFromExtension(item.name);
 
           const newFile: TeleFile = {
             id: item.id,
             name: item.name,
             size: item.size,
-            mime: mimeType || "application/octet-stream",
+            mime: mimeType,
             folderPath: currentFolder,
             messageId: message.id,
             channelId,

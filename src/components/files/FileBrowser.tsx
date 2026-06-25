@@ -108,6 +108,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const [newFileName, setNewFileName] = useState("");
   const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TeleFile | null>(null);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   // Update current folder path in store on mount/change
   useEffect(() => {
@@ -121,9 +122,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     if (filter === "All") return true;
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
     if (isDir) return false; // Hide folders when a media filter is active
-
     const category = getFileCategory(file.name, file.mime);
-    console.log(`[Teledrive Debug] matchFilter: file="${file.name}" mime="${file.mime}" category="${category}" activeFilter="${filter}" match=${category === filter}`);
     return category === filter;
   };
 
@@ -307,15 +306,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       }
     };
     
-    const handleDeleteSelected = async () => {
+    const handleDeleteSelected = () => {
       if (selectedIds.length > 0) {
-        const confirmDelete = window.confirm(`Permanently delete ${selectedIds.length} items from trash?`);
-        if (confirmDelete) {
-          for (const id of selectedIds) {
-            await deletePermanently(id);
-          }
-          clearSelection();
-        }
+        setBulkDeleteDialogOpen(true);
       }
     };
 
@@ -365,13 +358,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     clearSelection();
   };
 
-  const handleBulkDelete = async () => {
-    if (window.confirm(`Are you sure you want to permanently delete these ${selectedIds.length} items?`)) {
-      for (const id of selectedIds) {
-        await deletePermanently(id);
-      }
-      clearSelection();
+  const handleBulkDelete = () => {
+    setBulkDeleteDialogOpen(true);
+  };
+
+  const confirmBulkDelete = async () => {
+    setBulkDeleteDialogOpen(false);
+    for (const id of selectedIds) {
+      await deletePermanently(id);
     }
+    clearSelection();
   };
 
   // Render helpers
@@ -1207,6 +1203,41 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               }}
             >
               {isOperating ? "Deleting…" : "Delete Permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ------------------------------------------------------------------ */}
+      {/* Bulk permanent delete confirmation dialog                           */}
+      {/* ------------------------------------------------------------------ */}
+      <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-red-500" />
+              Delete {selectedIds.length} Item{selectedIds.length !== 1 ? "s" : ""} Permanently
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+            This will permanently delete <strong>{selectedIds.length} selected item{selectedIds.length !== 1 ? "s" : ""}</strong> from
+            your Telegram storage channel. This action <strong>cannot be undone</strong>.
+          </p>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs font-semibold"
+              onClick={() => setBulkDeleteDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isOperating}
+              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={confirmBulkDelete}
+            >
+              {isOperating ? "Deleting…" : `Delete ${selectedIds.length} Item${selectedIds.length !== 1 ? "s" : ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
