@@ -12,6 +12,7 @@ export interface TeleFile {
   archived?: boolean;
   lastOpenedAt?: number;
   thumbnailUrl?: string;
+  offline?: boolean;
 }
 
 export interface SelectedFile {

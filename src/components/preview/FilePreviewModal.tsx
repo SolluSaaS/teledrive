@@ -43,6 +43,7 @@ import { TeleFile } from "@/lib/types";
 import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/downloader";
 import { updateFileLocal, addFile, deleteTelegramMessage } from "@/lib/storage/metadataStore";
 import { uploadFileToTelegram } from "@/lib/telegram/uploader";
+import { readOfflineCache } from "@/lib/storage/offlineStorage";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
@@ -527,10 +528,26 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       setTextContent(null); setContentUrl(null); setMarkdownHtml(null);
 
       try {
-        const buffer = await downloadFileToBuffer(
-          file.channelId, file.messageId,
-          (pct) => { if (current) setProgress(pct); }
-        );
+        let buffer: Uint8Array;
+        if (file.offline) {
+          setProgress(50);
+          try {
+            buffer = await readOfflineCache(file.id);
+            setProgress(100);
+            console.log(`[FilePreviewModal] Loaded "${file.name}" from local offline cache.`);
+          } catch (offlineErr) {
+            console.warn(`[FilePreviewModal] Failed to read offline cache for "${file.name}", falling back to download:`, offlineErr);
+            buffer = await downloadFileToBuffer(
+              file.channelId, file.messageId,
+              (pct) => { if (current) setProgress(pct); }
+            );
+          }
+        } else {
+          buffer = await downloadFileToBuffer(
+            file.channelId, file.messageId,
+            (pct) => { if (current) setProgress(pct); }
+          );
+        }
         if (!current) return;
 
         const mimeLower = file.mime.toLowerCase();
@@ -563,7 +580,13 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
           if (current) setContentUrl(URL.createObjectURL(blob));
         }
       } catch (err: any) {
-        if (current) setError(err.message || "Failed to download file.");
+        if (current) {
+          if (!navigator.onLine && !file.offline) {
+            setError("You are currently offline, and this file has not been marked as 'Available offline'. Connect to the internet to open it.");
+          } else {
+            setError(err.message || "Failed to download file.");
+          }
+        }
       } finally {
         if (current) setLoading(false);
       }

@@ -5,6 +5,7 @@ import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
 import { toast } from "sonner";
+import { cacheFileOffline, removeOfflineCache } from "../lib/storage/offlineStorage";
 
 class ActionQueue {
   private queue: (() => Promise<any>)[] = [];
@@ -329,6 +330,9 @@ export function useFileActions() {
             const targets = files.filter((f) => f.id === fileId || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/"));
             const active = files.filter((f) => f.id !== fileId && f.folderPath !== folderPathPrefix && !f.folderPath.startsWith(folderPathPrefix + "/"));
 
+            // Clear local offline caches
+            await Promise.allSettled(targets.map((f) => removeOfflineCache(f.id)));
+
             const deletionPromises = targets
               .filter((f) => f.messageId && f.messageId !== 0)
               .map((f) =>
@@ -345,6 +349,7 @@ export function useFileActions() {
             updated = active;
           });
         } else {
+          await removeOfflineCache(fileId);
           updated = await removeFile(channelId, fileId);
         }
 
@@ -371,6 +376,9 @@ export function useFileActions() {
             toast.info("Trash is already empty");
             return;
           }
+
+          // Clear local offline caches
+          await Promise.allSettled(trashed.map((f) => removeOfflineCache(f.id)));
 
           const deletionPromises = trashed
             .filter((f) => f.messageId && f.messageId !== 0)
@@ -493,6 +501,9 @@ export function useFileActions() {
           const targets = files.filter(isTargetOrInFolder);
           const active = files.filter((f) => !isTargetOrInFolder(f));
 
+          // Clear local offline caches
+          await Promise.allSettled(targets.map((f) => removeOfflineCache(f.id)));
+
           const deletionPromises = targets
             .filter((f) => f.messageId && f.messageId !== 0)
             .map((f) =>
@@ -586,6 +597,32 @@ export function useFileActions() {
     });
   };
 
+  const toggleOffline = async (file: TeleFile) => {
+    return fileActionQueue.enqueue(async () => {
+      try {
+        const channelId = await getChannelId();
+        const allFiles = useFileStore.getState().files;
+        const currentFile = allFiles.find((f) => f.id === file.id);
+        const nextOffline = currentFile ? !currentFile.offline : !file.offline;
+
+        if (nextOffline) {
+          toast.info(`Downloading "${file.name}" for offline access...`);
+          await cacheFileOffline(channelId, file.messageId, file.id);
+          toast.success(`"${file.name}" is now available offline`);
+        } else {
+          await removeOfflineCache(file.id);
+          toast.success(`"${file.name}" is no longer available offline`);
+        }
+
+        const updated = await updateFile(channelId, file.id, { offline: nextOffline });
+        setFiles(updated);
+      } catch (err: any) {
+        console.error("Failed to toggle offline availability:", err);
+        toast.error(err.message || "Failed to update offline status");
+      }
+    });
+  };
+
   return {
     isOperating,
     createFolder,
@@ -602,5 +639,6 @@ export function useFileActions() {
     deleteMultiplePermanently,
     archiveMultiple,
     unarchiveMultiple,
+    toggleOffline,
   };
 }

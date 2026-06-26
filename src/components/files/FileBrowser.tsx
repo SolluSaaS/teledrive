@@ -19,6 +19,8 @@ import {
   Download,
   Edit2,
   Archive,
+  CheckCircle,
+  Check,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -169,6 +171,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     moveMultipleToTrash,
     restoreMultipleFromTrash,
     deleteMultiplePermanently,
+    toggleOffline,
   } = useFileActions();
 
   const isMobile = useIsMobile();
@@ -771,6 +774,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onDeletePermanently={setDeleteTarget}
                       onArchive={archiveFile}
                       onUnarchive={unarchiveFile}
+                      onOfflineToggle={toggleOffline}
                     >
                       <div
                         onClick={(e) => handleItemClick(e, file)}
@@ -791,6 +795,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           <FileIcon name={file.name} mime={file.mime} size="lg" />
                           {file.starred && (
                             <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          )}
+                          {file.offline && (
+                            <CheckCircle className="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-green-500 fill-green-500/20 dark:fill-green-950/30 shrink-0" />
                           )}
                         </div>
 
@@ -816,6 +823,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             onDeletePermanently={setDeleteTarget}
                             onArchive={archiveFile}
                             onUnarchive={unarchiveFile}
+                            onOfflineToggle={toggleOffline}
                           />
                           </div>
                         </div>
@@ -872,6 +880,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     onDeletePermanently={setDeleteTarget}
                     onArchive={archiveFile}
                     onUnarchive={unarchiveFile}
+                    onOfflineToggle={toggleOffline}
                   >
                     <tr
                       onClick={(e) => handleItemClick(e, file)}
@@ -900,6 +909,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           {file.starred && (
                             <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0 ml-0.5" />
                           )}
+                          {file.offline && (
+                            <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-500/20 dark:fill-green-950/30 shrink-0 ml-0.5" />
+                          )}
                         </div>
                       </td>
                       <td className="py-3 px-4 hidden sm:table-cell text-xs text-slate-550 dark:text-slate-400">
@@ -923,6 +935,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           onDeletePermanently={setDeleteTarget}
                           onArchive={archiveFile}
                           onUnarchive={unarchiveFile}
+                          onOfflineToggle={toggleOffline}
                         />
                       </td>
                     </tr>
@@ -1114,6 +1127,22 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     >
                       <Download className="h-4 w-4 text-slate-500" />
                       <span>Download</span>
+                    </button>
+                  )}
+                  {mobileContextFile.mime !== "inode/directory" && mobileContextFile.mime !== "application/x-directory" && !mobileContextFile.trashed && (
+                    <button
+                      onClick={() => {
+                        const f = mobileContextFile;
+                        setMobileContextFile(null);
+                        toggleOffline(f);
+                      }}
+                      className="flex items-center justify-between px-3 py-3 text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left font-semibold text-slate-700 dark:text-slate-200 border-0 cursor-pointer w-full bg-transparent"
+                    >
+                      <div className="flex items-center gap-3">
+                        <CheckCircle className={`h-4 w-4 ${mobileContextFile.offline ? "text-green-500 fill-green-500/20" : "text-slate-500"}`} />
+                        <span>Available offline</span>
+                      </div>
+                      {mobileContextFile.offline && <Check className="h-4 w-4 text-green-500 shrink-0" />}
                     </button>
                   )}
                   {!mobileContextFile.trashed && (

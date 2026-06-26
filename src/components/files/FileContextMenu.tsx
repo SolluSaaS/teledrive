@@ -17,6 +17,8 @@ import {
   RotateCcw,
   Archive,
   ArchiveRestore,
+  CheckCircle,
+  Check,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { isEditableFile } from "@/lib/files/editableTypes";
@@ -34,6 +36,7 @@ interface FileContextMenuProps {
   onDeletePermanently?: (file: TeleFile) => void;
   onArchive?: (file: TeleFile) => void;
   onUnarchive?: (file: TeleFile) => void;
+  onOfflineToggle?: (file: TeleFile) => void;
 }
 
 export const FileContextMenu = React.memo(function FileContextMenu({
@@ -49,6 +52,7 @@ export const FileContextMenu = React.memo(function FileContextMenu({
   onDeletePermanently,
   onArchive,
   onUnarchive,
+  onOfflineToggle,
 }: FileContextMenuProps) {
   const isDirectory = file.mime === "inode/directory" || file.mime === "application/x-directory";
 
@@ -81,6 +85,18 @@ export const FileContextMenu = React.memo(function FileContextMenu({
           >
             <Download className="h-4 w-4" />
             <span>Download</span>
+          </ContextMenuItem>
+        )}
+        {!isDirectory && !file.trashed && !file.archived && onOfflineToggle && (
+          <ContextMenuItem
+            onClick={() => onOfflineToggle(file)}
+            className="flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle className={`h-4 w-4 ${file.offline ? "text-green-500 fill-green-500/20" : "text-slate-400"}`} />
+              <span>Available offline</span>
+            </div>
+            {file.offline && <Check className="h-4 w-4 text-green-500 shrink-0" />}
           </ContextMenuItem>
         )}
 

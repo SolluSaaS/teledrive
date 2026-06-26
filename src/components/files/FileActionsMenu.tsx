@@ -19,6 +19,8 @@ import {
   RotateCcw,
   Archive,
   ArchiveRestore,
+  CheckCircle,
+  Check,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -37,6 +39,7 @@ interface FileActionsMenuProps {
   onDeletePermanently?: (file: TeleFile) => void;
   onArchive?: (file: TeleFile) => void;
   onUnarchive?: (file: TeleFile) => void;
+  onOfflineToggle?: (file: TeleFile) => void;
 }
 
 export const FileActionsMenu = React.memo(function FileActionsMenu({
@@ -51,6 +54,7 @@ export const FileActionsMenu = React.memo(function FileActionsMenu({
   onDeletePermanently,
   onArchive,
   onUnarchive,
+  onOfflineToggle,
 }: FileActionsMenuProps) {
   const isDirectory = file.mime === "inode/directory" || file.mime === "application/x-directory";
 
@@ -97,6 +101,21 @@ export const FileActionsMenu = React.memo(function FileActionsMenu({
               <Download className="h-4 w-4 text-slate-450 dark:text-slate-500 group-focus/dropdown-menu-item:text-slate-900 dark:group-focus/dropdown-menu-item:text-slate-100 transition-colors shrink-0" strokeWidth={1.75} />
               <span>Download</span>
             </DropdownMenuItem>
+            {onOfflineToggle && (
+              <DropdownMenuItem
+                onClick={() => onOfflineToggle(file)}
+                className="flex items-center justify-between px-3 py-2 text-xs font-medium cursor-pointer rounded-lg text-slate-700 dark:text-slate-200"
+              >
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle className={cn(
+                    "h-4 w-4 shrink-0 transition-colors",
+                    file.offline ? "text-green-500 fill-green-500/20" : "text-slate-450 dark:text-slate-500"
+                  )} strokeWidth={1.75} />
+                  <span>Available offline</span>
+                </div>
+                {file.offline && <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator className="-mx-1.5 my-1.5 opacity-60 dark:opacity-40" />
           </>
         )}

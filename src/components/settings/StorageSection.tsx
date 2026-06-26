@@ -67,7 +67,13 @@ export default function StorageSection() {
         toast.error("Storage channel not initialised yet.");
         return;
       }
-      const freshFiles = await loadIndex(channelId);
+      let freshFiles = await loadIndex(channelId);
+      try {
+        const { syncOfflineStatusWithDisk } = await import("@/lib/storage/offlineStorage");
+        freshFiles = await syncOfflineStatusWithDisk(freshFiles);
+      } catch (err) {
+        console.warn("[StorageSection] Failed to sync offline status with disk:", err);
+      }
       setFiles(freshFiles);
       toast.success("Storage refreshed from Telegram.");
     } catch (err: any) {

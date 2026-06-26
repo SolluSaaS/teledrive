@@ -25,6 +25,12 @@ export async function bootstrapTeleDrive(
 
   onStatusChange?.("Loading file metadata index...");
   let files = await loadIndex(channelId);
+  try {
+    const { syncOfflineStatusWithDisk } = await import("../storage/offlineStorage");
+    files = await syncOfflineStatusWithDisk(files);
+  } catch (err) {
+    console.warn("[bootstrap] Failed to sync offline status with disk:", err);
+  }
 
   // Initialize the local view immediately so the user can enter their drive instantly.
   onStatusChange?.("Initializing local storage view...");
