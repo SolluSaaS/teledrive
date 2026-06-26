@@ -192,23 +192,70 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
   // Video fullscreen handler
   const handleVideoFullscreen = useCallback(() => {
-    if (!videoContainerRef.current) return;
-    if (!document.fullscreenElement) {
-      videoContainerRef.current.requestFullscreen().catch((err) => {
-        console.error("Error attempting to enable fullscreen:", err);
-      });
+    const container = videoContainerRef.current;
+    if (!container) return;
+
+    const doc = document as any;
+    const elem = container as any;
+
+    const isFS = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+
+    if (!isFS) {
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(console.error);
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem.webkitRequestFullScreen) {
+        elem.webkitRequestFullScreen();
+      } else if (elem.mozRequestFullScreen) {
+        elem.mozRequestFullScreen();
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen();
+      } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
+        (videoRef.current as any).webkitEnterFullscreen();
+      }
     } else {
-      document.exitFullscreen();
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch(console.error);
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      } else if (doc.webkitCancelFullScreen) {
+        doc.webkitCancelFullScreen();
+      } else if (doc.mozCancelFullScreen) {
+        doc.mozCancelFullScreen();
+      } else if (doc.msExitFullscreen) {
+        doc.msExitFullscreen();
+      }
     }
   }, []);
 
   useEffect(() => {
     const onFullscreenChange = () => {
-      setIsVideoFullscreen(!!document.fullscreenElement);
+      const doc = document as any;
+      const isFS = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      setIsVideoFullscreen(isFS);
     };
+
     document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    document.addEventListener("mozfullscreenchange", onFullscreenChange);
+    document.addEventListener("MSFullscreenChange", onFullscreenChange);
+
     return () => {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", onFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", onFullscreenChange);
     };
   }, []);
 
