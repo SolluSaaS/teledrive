@@ -5,6 +5,8 @@ interface FileState {
   files: TeleFile[];
   currentFolder: string;
   selectedIds: string[];
+  /** O(1) lookup mirror of selectedIds — always kept in sync */
+  selectedIdsSet: Set<string>;
   isLoading: boolean;
   uploadQueue: UploadItem[];
   setFiles: (files: TeleFile[]) => void;
@@ -23,20 +25,25 @@ export const useFileStore = create<FileState>((set) => ({
   files: [],
   currentFolder: "/",
   selectedIds: [],
+  selectedIdsSet: new Set<string>(),
   isLoading: false,
   uploadQueue: [],
   setFiles: (files) => set({ files }),
-  setFolder: (currentFolder) => set({ currentFolder, selectedIds: [] }),
+  setFolder: (currentFolder) =>
+    set({ currentFolder, selectedIds: [], selectedIdsSet: new Set() }),
   toggleSelect: (id) =>
     set((state) => {
-      const isSelected = state.selectedIds.includes(id);
-      const selectedIds = isSelected
-        ? state.selectedIds.filter((x) => x !== id)
-        : [...state.selectedIds, id];
-      return { selectedIds };
+      const next = new Set(state.selectedIdsSet);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return { selectedIds: Array.from(next), selectedIdsSet: next };
     }),
-  setSelectedIds: (selectedIds) => set({ selectedIds }),
-  clearSelection: () => set({ selectedIds: [] }),
+  setSelectedIds: (selectedIds) =>
+    set({ selectedIds, selectedIdsSet: new Set(selectedIds) }),
+  clearSelection: () => set({ selectedIds: [], selectedIdsSet: new Set() }),
   addToQueue: (item) =>
     set((state) => ({ uploadQueue: [...state.uploadQueue, item] })),
   updateQueueItem: (id, patch) =>

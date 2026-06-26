@@ -16,6 +16,46 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // ── Vendor chunks ────────────────────────────────────────────────
+          // Split CodeMirror into its own large chunk (970KB+ raw)
+          if (id.includes("node_modules/@codemirror") || id.includes("node_modules/@lezer")) {
+            return "codemirror-vendor";
+          }
+          // Telegram MTProto client — large, rarely changes
+          if (id.includes("node_modules/@mtcute") || id.includes("node_modules/mtcute")) {
+            return "telegram-vendor";
+          }
+          // React core — tiny but changes often break caching if mixed
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/scheduler/")
+          ) {
+            return "react-vendor";
+          }
+          // Radix UI + shadcn/ui components
+          if (id.includes("node_modules/@radix-ui") || id.includes("node_modules/cmdk")) {
+            return "ui-vendor";
+          }
+          // react-router-dom
+          if (id.includes("node_modules/react-router") || id.includes("node_modules/@remix-run")) {
+            return "router-vendor";
+          }
+          // Zustand state management
+          if (id.includes("node_modules/zustand")) {
+            return "state-vendor";
+          }
+        },
+      },
+    },
+    // Raise the warning threshold (we already split; remaining chunks are expected large)
+    chunkSizeWarningLimit: 600,
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

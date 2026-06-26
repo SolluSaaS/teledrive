@@ -1,3 +1,4 @@
+import React from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +39,7 @@ interface FileActionsMenuProps {
   onUnarchive?: (file: TeleFile) => void;
 }
 
-export function FileActionsMenu({
+export const FileActionsMenu = React.memo(function FileActionsMenu({
   file,
   onPreview,
   onDownload,
@@ -203,4 +204,4 @@ export function FileActionsMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
+});

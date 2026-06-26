@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useDeferredValue } from "react";
 import { Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -13,11 +13,17 @@ export default function SearchBar() {
   const navigate = useNavigate();
   
   const files = useFileStore((state) => state.files);
-  
+
+  // Defer the expensive fuzzy-search computation so the input stays responsive
+  const deferredQuery = useDeferredValue(query);
+
   // Get top 5 fuzzy match quick results for non-trashed files
-  const quickResults = query.trim()
-    ? fuzzySearch(files.filter((f) => !f.trashed), query).slice(0, 5)
+  const quickResults = deferredQuery.trim()
+    ? fuzzySearch(files.filter((f) => !f.trashed), deferredQuery).slice(0, 5)
     : [];
+
+  // Whether search results are stale (input faster than search)
+  const isStale = deferredQuery !== query;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +89,7 @@ export default function SearchBar() {
 
       {/* Inline Quick Search Results Suggestion Dropdown */}
       {isFocused && query.trim() !== "" && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl overflow-hidden z-50 animate-fade-in py-1">
+        <div className={`absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl overflow-hidden z-50 animate-fade-in py-1 transition-opacity duration-150 ${isStale ? "opacity-60" : "opacity-100"}`}>
           {quickResults.length > 0 ? (
             <div>
               <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Grid,
@@ -139,6 +139,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const {
     files,
     selectedIds,
+    selectedIdsSet,
     isLoading,
     setFolder,
     toggleSelect,
@@ -188,167 +189,136 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     }
   }, [folderPath, mode, setFolder]);
 
-  // Helper to match file against category filter
-  const matchFilter = (file: TeleFile, filter: string) => {
-    if (filter === "All") return true;
-    const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
-    if (isDir) return false; // Hide folders when a media filter is active
-    const category = getFileCategory(file.name, file.mime);
-    return category === filter;
-  };
+  // ── Memoized derived data ───────────────────────────────────────────────
 
-  const getSortLabel = (val: string) => {
-    switch (val) {
-      case "name_asc":
-        return "Name (A-Z)";
-      case "name_desc":
-        return "Name (Z-A)";
-      case "date_desc":
-        return "Newest";
-      case "date_asc":
-        return "Oldest";
-      case "size_desc":
-        return "Largest";
-      case "size_asc":
-        return "Smallest";
-      default:
-        return "Name (A-Z)";
+  const sortLabel = useMemo(() => {
+    switch (sortBy) {
+      case "name_asc": return "Name (A-Z)";
+      case "name_desc": return "Name (Z-A)";
+      case "date_desc": return "Newest";
+      case "date_asc": return "Oldest";
+      case "size_desc": return "Largest";
+      case "size_asc": return "Smallest";
+      default: return "Name (A-Z)";
     }
-  };
+  }, [sortBy]);
 
-  // Filter and sort files based on active mode
-  const getFilteredFiles = () => {
+  // Full filtered + sorted display list — only recomputed when its deps change
+  const { displayFiles, folders, regularFiles } = useMemo(() => {
     let filtered = [...files];
 
     if (mode === "drive") {
-      // Show files in the active directory, not trashed, not archived
       filtered = filtered.filter((f) => f.folderPath === folderPath && !f.trashed && !f.archived);
     } else if (mode === "starred") {
-      // Show all starred files, not trashed, not archived
       filtered = filtered.filter((f) => f.starred && !f.trashed && !f.archived);
     } else if (mode === "recent") {
-      // Show all files, not trashed, not archived
       filtered = filtered.filter((f) => !f.trashed && !f.archived);
     } else if (mode === "trash") {
-      // Show all trashed files
       filtered = filtered.filter((f) => f.trashed);
     } else if (mode === "archived") {
-      // Show all archived, non-trashed files
       filtered = filtered.filter((f) => f.archived && !f.trashed);
     } else if (mode === "search") {
-      // Show search matches among non-trashed, non-archived files
       filtered = fuzzySearch(filtered.filter((f) => !f.trashed && !f.archived), searchQuery);
     }
 
-    // Apply category filter
-    filtered = filtered.filter((file) => matchFilter(file, filterType));
+    // Apply category filter (folders always pass when a media filter is active)
+    if (filterType !== "All") {
+      filtered = filtered.filter((f) => {
+        const isDir = f.mime === "inode/directory" || f.mime === "application/x-directory";
+        if (isDir) return false;
+        return getFileCategory(f.name, f.mime) === filterType;
+      });
+    }
 
     // Sort: Folders always first, then by active sortBy
+    const activeSortBy = mode === "recent" && sortBy === "name_asc" ? "date_desc" : sortBy;
     filtered.sort((a, b) => {
       const aIsDir = a.mime === "inode/directory" || a.mime === "application/x-directory";
       const bIsDir = b.mime === "inode/directory" || b.mime === "application/x-directory";
-
       if (aIsDir && !bIsDir) return -1;
       if (!aIsDir && bIsDir) return 1;
-
-      // Recent page default is date_desc if sortBy is default
-      const activeSortBy = mode === "recent" && sortBy === "name_asc" ? "date_desc" : sortBy;
-
       switch (activeSortBy) {
-        case "name_asc":
-          return a.name.localeCompare(b.name);
-        case "name_desc":
-          return b.name.localeCompare(a.name);
-        case "date_asc":
-          return (a.lastOpenedAt || a.uploadedAt) - (b.lastOpenedAt || b.uploadedAt);
-        case "date_desc":
-          return (b.lastOpenedAt || b.uploadedAt) - (a.lastOpenedAt || a.uploadedAt);
-        case "size_asc":
-          return a.size - b.size;
-        case "size_desc":
-          return b.size - a.size;
-        default:
-          return a.name.localeCompare(b.name);
+        case "name_asc": return a.name.localeCompare(b.name);
+        case "name_desc": return b.name.localeCompare(a.name);
+        case "date_asc": return (a.lastOpenedAt || a.uploadedAt) - (b.lastOpenedAt || b.uploadedAt);
+        case "date_desc": return (b.lastOpenedAt || b.uploadedAt) - (a.lastOpenedAt || a.uploadedAt);
+        case "size_asc": return a.size - b.size;
+        case "size_desc": return b.size - a.size;
+        default: return a.name.localeCompare(b.name);
       }
     });
 
-    return filtered;
-  };
+    const flds = filtered.filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory");
+    const regs = filtered.filter((f) => f.mime !== "inode/directory" && f.mime !== "application/x-directory");
+    return { displayFiles: filtered, folders: flds, regularFiles: regs };
+  }, [files, mode, folderPath, filterType, sortBy, searchQuery]);
 
-  const displayFiles = getFilteredFiles();
-
-  const folders = displayFiles.filter(
-    (f) => f.mime === "inode/directory" || f.mime === "application/x-directory"
-  );
-  const regularFiles = displayFiles.filter(
-    (f) => f.mime !== "inode/directory" && f.mime !== "application/x-directory"
-  );
-
-  // Breadcrumbs calculation
-  const getBreadcrumbs = () => {
+  // Breadcrumbs — only recompute when folderPath changes
+  const breadcrumbs = useMemo(() => {
     if (folderPath === "/") return [];
     const segments = folderPath.split("/").filter(Boolean);
     let accumPath = "";
     return segments.map((seg) => {
       accumPath += `/${seg}`;
-      return {
-        name: seg,
-        link: `/drive/folder${accumPath}`,
-      };
+      return { name: seg, link: `/drive/folder${accumPath}` };
     });
-  };
+  }, [folderPath]);
 
-  const breadcrumbs = getBreadcrumbs();
+  // Header title — only recompute when mode/folderPath/searchQuery change
+  const headerTitle = useMemo(() => {
+    switch (mode) {
+      case "starred": return "Starred";
+      case "recent": return "Recent";
+      case "trash": return "Trash";
+      case "archived": return "Archived";
+      case "search": return `Search results for "${searchQuery}"`;
+      default:
+        if (folderPath !== "/") {
+          const segments = folderPath.split("/").filter(Boolean);
+          return segments[segments.length - 1] || "My Drive";
+        }
+        return "My Drive";
+    }
+  }, [mode, folderPath, searchQuery]);
 
-  // Navigation handlers
-  const handleItemClick = (e: React.MouseEvent, file: TeleFile) => {
-    // If Ctrl/Cmd/Shift is pressed, handle selection
+  // ── Memoized callbacks ──────────────────────────────────────────────────
+
+  const toastPreview = useCallback((file: TeleFile) => {
+    window.dispatchEvent(new CustomEvent("teledrive-preview-file", { detail: file }));
+  }, []);
+
+  const handleEdit = useCallback((file: TeleFile) => {
+    window.dispatchEvent(new CustomEvent("teledrive-edit-file", { detail: file }));
+  }, []);
+
+  const handleDownload = useCallback((file: TeleFile) => {
+    window.dispatchEvent(new CustomEvent("teledrive-download-file", { detail: file }));
+  }, []);
+
+  const triggerUpload = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("teledrive-trigger-upload"));
+  }, []);
+
+  const triggerFolderUpload = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("teledrive-trigger-folder-upload"));
+  }, []);
+
+  const handleItemClick = useCallback((e: React.MouseEvent, file: TeleFile) => {
     if (e.ctrlKey || e.metaKey || e.shiftKey) {
       e.preventDefault();
-      toggleSelect(file.id);
-      return;
     }
-
-    // Single click select on mobile / desktop
     toggleSelect(file.id);
-  };
+  }, [toggleSelect]);
 
-  const handleItemDoubleClick = (file: TeleFile) => {
+  const handleItemDoubleClick = useCallback((file: TeleFile) => {
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
     if (isDir) {
       clearSelection();
       navigate(`/drive/folder${file.folderPath === "/" ? "" : file.folderPath}/${file.name}`);
     } else {
-      // Preview action (handled in Phase 8)
       toastPreview(file);
     }
-  };
-
-  const toastPreview = (file: TeleFile) => {
-    // For now, emit a custom event so preview modal can listen to it
-    const event = new CustomEvent("teledrive-preview-file", { detail: file });
-    window.dispatchEvent(event);
-  };
-
-  const handleEdit = (file: TeleFile) => {
-    const event = new CustomEvent("teledrive-edit-file", { detail: file });
-    window.dispatchEvent(event);
-  };
-
-  const handleDownload = (file: TeleFile) => {
-    const event = new CustomEvent("teledrive-download-file", { detail: file });
-    window.dispatchEvent(event);
-  };
-
-  const triggerUpload = () => {
-    const event = new CustomEvent("teledrive-trigger-upload");
-    window.dispatchEvent(event);
-  };
-
-  const triggerFolderUpload = () => {
-    const event = new CustomEvent("teledrive-trigger-folder-upload");
-    window.dispatchEvent(event);
-  };
+  }, [clearSelection, navigate, toastPreview]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -449,27 +419,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     clearSelection();
   };
 
-  // Render helpers
-  const getHeaderTitle = () => {
-    switch (mode) {
-      case "starred":
-        return "Starred";
-      case "recent":
-        return "Recent";
-      case "trash":
-        return "Trash";
-      case "archived":
-        return "Archived";
-      case "search":
-        return `Search results for "${searchQuery}"`;
-      default:
-        if (folderPath !== "/") {
-          const segments = folderPath.split("/").filter(Boolean);
-          return segments[segments.length - 1] || "My Drive";
-        }
-        return "My Drive";
-    }
-  };
+  // Render helpers (headerTitle is now memoized above)
 
   const renderEmptyState = () => {
     let title = "Your drive is empty";
@@ -546,7 +496,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-200 dark:border-slate-800/60 pb-4 shrink-0">
         <div className="space-y-1.5">
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-850 dark:text-slate-100">
-            {getHeaderTitle()}
+            {headerTitle}
           </h1>
           {mode === "drive" && breadcrumbs.length > 0 && (
             <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto whitespace-nowrap py-1">
@@ -687,7 +637,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 className="h-8 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 px-3 flex items-center gap-1.5"
               >
                 <ArrowUpDown className="h-3.5 w-3.5" />
-                <span>Sort: {getSortLabel(sortBy)}</span>
+                <span>Sort: {sortLabel}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -747,7 +697,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
                 {folders.map((folder, index) => {
-                  const isSelected = selectedIds.includes(folder.id);
+                  const isSelected = selectedIdsSet.has(folder.id);
                   return (
                     <FileContextMenu
                       key={folder.id}
@@ -812,7 +762,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               </span>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {regularFiles.map((file, index) => {
-                  const isSelected = selectedIds.includes(file.id);
+                  const isSelected = selectedIdsSet.has(file.id);
                   return (
                     <FileContextMenu
                       key={file.id}
@@ -911,7 +861,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             </thead>
             <tbody>
               {displayFiles.map((file, index) => {
-                const isSelected = selectedIds.includes(file.id);
+                const isSelected = selectedIdsSet.has(file.id);
                 const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
                 
                 return (

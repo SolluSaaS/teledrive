@@ -1,3 +1,4 @@
+import React from "react";
 import {
   FileText,
   FileImage,
@@ -18,7 +19,7 @@ interface FileIconProps {
   className?: string;
 }
 
-export function FileIcon({ name = "", mime, size = "md", className }: FileIconProps) {
+export const FileIcon = React.memo(function FileIcon({ name = "", mime, size = "md", className }: FileIconProps) {
   const sizeClasses = {
     sm: "h-5 w-5",
     md: "h-10 w-10",
@@ -86,4 +87,4 @@ export function FileIcon({ name = "", mime, size = "md", className }: FileIconPr
       <Icon className={currentSizeClass} strokeWidth={size === "sm" ? 2 : 1.75} />
     </div>
   );
-}
+});

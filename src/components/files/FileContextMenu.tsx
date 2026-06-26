@@ -36,7 +36,7 @@ interface FileContextMenuProps {
   onUnarchive?: (file: TeleFile) => void;
 }
 
-export function FileContextMenu({
+export const FileContextMenu = React.memo(function FileContextMenu({
   file,
   children,
   onPreview,
@@ -175,4 +175,4 @@ export function FileContextMenu({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
