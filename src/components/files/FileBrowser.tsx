@@ -172,11 +172,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     restoreMultipleFromTrash,
     deleteMultiplePermanently,
     toggleOffline,
+    moveMultipleFilesOrFolders,
   } = useFileActions();
 
   const isMobile = useIsMobile();
   const touchTimeoutRef = useRef<any>(null);
   const [mobileContextFile, setMobileContextFile] = useState<TeleFile | null>(null);
+
+  // Drag and Drop state
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -325,6 +330,62 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       toastPreview(file);
     }
   }, [clearSelection, navigate, toastPreview]);
+
+  const handleDragStart = (e: React.DragEvent, file: TeleFile) => {
+    // Determine which IDs are being dragged (respect multi-selection)
+    const dragIds = selectedIdsSet.has(file.id) ? selectedIds : [file.id];
+
+    // Write IDs to global store — the drop handlers read from here
+    // This bypasses unreliable dataTransfer.getData() in Tauri WebKit on macOS
+    useFileStore.getState().setDraggedItemIds(dragIds);
+
+    // Also write to dataTransfer as a best-effort fallback for external drop targets
+    try { e.dataTransfer.setData("text/plain", JSON.stringify(dragIds)); } catch { /* ignore */ }
+    e.dataTransfer.effectAllowed = "move";
+    setDraggedId(file.id);
+  };
+
+  const handleDragEnd = () => {
+    useFileStore.getState().clearDraggedItemIds();
+    setDraggedId(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDragEnter = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverId(targetId);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Only clear drag-over state when actually leaving the zone (not entering a child element)
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDragOverId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
+    e.preventDefault();
+    e.stopPropagation(); // prevent DriveLayout root handler from also firing
+    setDragOverId(null);
+    setDraggedId(null);
+
+    // Read IDs from the global store (reliable in Tauri WebKit unlike dataTransfer)
+    const fileIds = useFileStore.getState().draggedItemIds;
+    useFileStore.getState().clearDraggedItemIds();
+
+    if (!fileIds || fileIds.length === 0) return;
+
+    try {
+      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
+      clearSelection();
+    } catch (err) {
+      console.error("Failed to handle drop:", err);
+    }
+  };
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -501,7 +562,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <Link
                 to="/drive/my-drive"
                 onClick={clearSelection}
-                className="flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400"
+                onDragOver={handleDragOver}
+                onDragEnter={(e) => handleDragEnter(e, "crumb_home")}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, "/")}
+                className={cn(
+                  "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                  dragOverId === "crumb_home" && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
+                )}
               >
                 <Home className="h-3.5 w-3.5 shrink-0" />
                 <span>My Drive</span>
@@ -518,7 +586,17 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     <Link
                       to={crumb.link}
                       onClick={clearSelection}
-                      className="hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400"
+                      onDragOver={handleDragOver}
+                      onDragEnter={(e) => handleDragEnter(e, `crumb_${crumb.link}`)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => {
+                        const targetPath = crumb.link.substring("/drive/folder".length);
+                        handleDrop(e, targetPath);
+                      }}
+                      className={cn(
+                        "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                        dragOverId === `crumb_${crumb.link}` && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
+                      )}
                     >
                       {crumb.name}
                     </Link>
@@ -696,6 +774,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
                 {folders.map((folder, index) => {
                   const isSelected = selectedIdsSet.has(folder.id);
+                  const isBeingDragged = draggedId !== null && (draggedId === folder.id || (isSelected && selectedIdsSet.has(draggedId)));
                   return (
                     <FileContextMenu
                       key={folder.id}
@@ -716,12 +795,27 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchStart={() => handleTouchStartItem(folder)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
+                        draggable={true}
+                        onDragStart={(e) => handleDragStart(e, folder)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={handleDragOver}
+                        onDragEnter={(e) => handleDragEnter(e, folder.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => {
+                          const folderPathPrefix = folder.folderPath === "/" 
+                            ? `/${folder.name}` 
+                            : `${folder.folderPath}/${folder.name}`;
+                          handleDrop(e, folderPathPrefix);
+                        }}
                         style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                         className={cn(
                           "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none animate-slide-up-fade",
                           isSelected
                             ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
-                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40"
+                            : dragOverId === folder.id
+                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-400 dark:bg-brand-950/20 ring-2 ring-brand-500/20 scale-[1.02] shadow-sm"
+                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40",
+                          isBeingDragged && "opacity-40"
                         )}
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -782,12 +876,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchStart={() => handleTouchStartItem(file)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
+                        draggable={true}
+                        onDragStart={(e) => handleDragStart(e, file)}
+                        onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(folders.length + index, 15) * 20}ms` }}
                         className={cn(
                           "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 hover:shadow-md select-none h-44 animate-slide-up-fade",
                           isSelected
                             ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
-                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700"
+                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700",
+                          (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                         )}
                       >
                         {/* Upper icon/preview box */}
@@ -888,10 +986,25 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       onTouchStart={() => handleTouchStartItem(file)}
                       onTouchEnd={handleTouchEndItem}
                       onTouchMove={handleTouchEndItem}
+                      draggable={true}
+                      onDragStart={(e) => handleDragStart(e, file)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => isDir && handleDragOver(e)}
+                      onDragEnter={(e) => isDir && handleDragEnter(e, file.id)}
+                      onDragLeave={(e) => isDir && handleDragLeave(e)}
+                      onDrop={(e) => {
+                        if (!isDir) return;
+                        const folderPathPrefix = file.folderPath === "/" 
+                          ? `/${file.name}` 
+                          : `${file.folderPath}/${file.name}`;
+                        handleDrop(e, folderPathPrefix);
+                      }}
                       style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                       className={cn(
                         "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150 animate-slide-up-fade",
-                        isSelected && "bg-brand-50/40 dark:bg-brand-950/15"
+                        isSelected && "bg-brand-50/40 dark:bg-brand-950/15",
+                        dragOverId === file.id && isDir && "bg-brand-50/70 dark:bg-brand-950/30 border-brand-500 border-2",
+                        (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                       )}
                     >
                       <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>

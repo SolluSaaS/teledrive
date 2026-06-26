@@ -3,6 +3,7 @@ import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Arch
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
+import { useFileActions } from "@/hooks/useFileActions";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import SearchBar from "./SearchBar";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,12 @@ export default function DriveLayout() {
   const isMobile = useIsMobile();
   const phoneNumber = useAuthStore((state) => state.phoneNumber);
   
+  const {
+    moveMultipleFilesOrFolders,
+    moveMultipleToTrash,
+    archiveMultiple,
+  } = useFileActions();
+
   const [previewFile, setPreviewFile] = useState<TeleFile | null>(null);
   const [previewInitialEditMode, setPreviewInitialEditMode] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -39,6 +46,7 @@ export default function DriveLayout() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   const [isDragging, setIsDragging] = useState(false);
+  const [sidebarDragOverPath, setSidebarDragOverPath] = useState<string | null>(null);
   const dragCounter = useRef(0);
 
   useEffect(() => {
@@ -51,6 +59,47 @@ export default function DriveLayout() {
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  const handleSidebarDragOver = (e: React.DragEvent, path: string) => {
+    if (["/drive/my-drive", "/drive/archived", "/drive/trash"].includes(path)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+
+  const handleSidebarDragEnter = (e: React.DragEvent, path: string) => {
+    if (["/drive/my-drive", "/drive/archived", "/drive/trash"].includes(path)) {
+      e.preventDefault();
+      setSidebarDragOverPath(path);
+    }
+  };
+
+  const handleSidebarDragLeave = (e: React.DragEvent) => {
+    // Only clear highlight when actually leaving the sidebar item (not entering a child)
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setSidebarDragOverPath(null);
+  };
+
+  const handleSidebarDrop = async (e: React.DragEvent, path: string) => {
+    e.preventDefault();
+    setSidebarDragOverPath(null);
+
+    // Read from global Zustand store — bypasses unreliable dataTransfer in Tauri WebKit
+    const fileIds = useFileStore.getState().draggedItemIds;
+    useFileStore.getState().clearDraggedItemIds();
+
+    if (!fileIds || fileIds.length === 0) return;
+
+    if (path === "/drive/my-drive") {
+      await moveMultipleFilesOrFolders(fileIds, "/");
+    } else if (path === "/drive/trash") {
+      await moveMultipleToTrash(fileIds);
+    } else if (path === "/drive/archived") {
+      await archiveMultiple(fileIds);
+    }
+
+    useFileStore.getState().clearSelection();
+  };
 
   // Pull-to-refresh states
   const [pullProgress, setPullProgress] = useState(0);
@@ -93,7 +142,9 @@ export default function DriveLayout() {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+    // Only show upload overlay for actual OS file drags, not internal TeleDrive item moves
+    const hasOsFiles = e.dataTransfer.items && Array.from(e.dataTransfer.items).some(item => item.kind === "file");
+    if (hasOsFiles) {
       setIsDragging(true);
     }
   };
@@ -118,11 +169,14 @@ export default function DriveLayout() {
     setIsDragging(false);
     dragCounter.current = 0;
 
+    // Only handle OS file uploads here — internal TeleDrive moves use stopPropagation
+    // so they never reach this handler. draggedItemIds will be empty for OS file drops.
     const droppedFiles = e.dataTransfer.files;
     if (droppedFiles && droppedFiles.length > 0) {
       addFilesToUploadQueue(Array.from(droppedFiles));
     }
   };
+
 
   useEffect(() => {
     const handleUploadTrigger = () => {
@@ -289,11 +343,18 @@ export default function DriveLayout() {
               key={item.label}
               to={item.path}
               onClick={() => isMobile && setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative group cursor-pointer ${
+              onDragOver={(e) => handleSidebarDragOver(e, item.path)}
+              onDragEnter={(e) => handleSidebarDragEnter(e, item.path)}
+              onDragLeave={handleSidebarDragLeave}
+              onDrop={(e) => handleSidebarDrop(e, item.path)}
+              className={cn(
+                "flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative group cursor-pointer border",
                 isActive
-                  ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
-                  : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border border-transparent hover:translate-x-0.5"
-              }`}
+                  ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
+                  : sidebarDragOverPath === item.path
+                  ? "bg-brand-500/10 border-brand-500/35 dark:border-brand-500/25 text-brand-600 dark:text-brand-400 scale-[1.02] shadow-sm"
+                  : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border-transparent hover:translate-x-0.5"
+              )}
             >
               {isActive && (
                 <div className="absolute left-0 top-2.5 bottom-2.5 w-1 bg-brand-500 rounded-r-full shadow-[0_0_8px_rgba(26,115,232,0.6)]" />

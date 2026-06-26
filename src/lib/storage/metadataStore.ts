@@ -65,6 +65,82 @@ async function resolveChannelInputPeer(channelId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Virtual Folder Reconstruction & Auto-Healing
+// ---------------------------------------------------------------------------
+
+/**
+ * Reconstructs missing virtual folders from a file list.
+ */
+export function reconstructMissingFolders(
+  files: TeleFile[],
+  channelId: string
+): { healedFiles: TeleFile[]; changed: boolean } {
+  const existingFolderPaths = new Set<string>();
+  for (const f of files) {
+    if (f.mime === "inode/directory" || f.mime === "application/x-directory") {
+      const fullPath = f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`;
+      existingFolderPaths.add(fullPath);
+    }
+  }
+
+  const reconstructedFolders: TeleFile[] = [];
+  let changed = false;
+
+  for (const f of files) {
+    if (f.trashed || f.archived) continue;
+    const path = f.folderPath;
+    if (!path || path === "/") continue;
+
+    const segments = path.split("/").filter(Boolean);
+    let currentParent = "/";
+
+    for (let i = 0; i < segments.length; i++) {
+      const name = segments[i];
+      const folderFullPath = currentParent === "/" ? `/${name}` : `${currentParent}/${name}`;
+
+      if (!existingFolderPaths.has(folderFullPath)) {
+        const newFolder: TeleFile = {
+          id: `healed_${Math.random().toString(36).substring(2, 11)}`,
+          name,
+          size: 0,
+          mime: "inode/directory",
+          folderPath: currentParent,
+          messageId: 0,
+          channelId,
+          uploadedAt: Date.now(),
+          starred: false,
+          trashed: false,
+          archived: false,
+        };
+        reconstructedFolders.push(newFolder);
+        existingFolderPaths.add(folderFullPath);
+        changed = true;
+      }
+
+      currentParent = folderFullPath;
+    }
+  }
+
+  return {
+    healedFiles: [...files, ...reconstructedFolders],
+    changed,
+  };
+}
+
+async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFile[]> {
+  const { healedFiles, changed } = reconstructMissingFolders(files, channelId);
+  if (changed) {
+    console.log(`[metadataStore] Healed missing virtual folders. Saving updated index to Telegram...`);
+    runExclusive(async () => {
+      await saveIndex(channelId, healedFiles);
+    }).catch((err) => {
+      console.error("[metadataStore] Failed to save healed index to Telegram:", err);
+    });
+  }
+  return healedFiles;
+}
+
+// ---------------------------------------------------------------------------
 // loadIndex
 // ---------------------------------------------------------------------------
 
@@ -123,7 +199,7 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
     );
     const hasPinnedIndex = pinned.some((m: any) => m?.text?.includes("teledrive_index"));
     if (hasPinnedIndex) {
-      return parseAndDedup(pinned);
+      return healAndSave(channelId, parseAndDedup(pinned));
     }
   } catch (pinnedErr) {
     console.warn("[metadataStore] Failed to load pinned messages, falling back to scan:", pinnedErr);
@@ -136,7 +212,7 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       5000,
       "client.getMessages(recent)"
     );
-    return parseAndDedup(recent);
+    return healAndSave(channelId, parseAndDedup(recent));
   } catch (scanErr) {
     console.error("[metadataStore] Failed to scan channel messages:", scanErr);
     return [];

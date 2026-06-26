@@ -7,6 +7,8 @@ interface FileState {
   selectedIds: string[];
   /** O(1) lookup mirror of selectedIds — always kept in sync */
   selectedIdsSet: Set<string>;
+  /** IDs currently being drag-moved (set on dragstart, cleared on dragend/drop) */
+  draggedItemIds: string[];
   isLoading: boolean;
   isSyncing: boolean;
   uploadQueue: UploadItem[];
@@ -17,6 +19,8 @@ interface FileState {
   toggleSelect: (id: string) => void;
   setSelectedIds: (ids: string[]) => void;
   clearSelection: () => void;
+  setDraggedItemIds: (ids: string[]) => void;
+  clearDraggedItemIds: () => void;
   addToQueue: (item: UploadItem) => void;
   updateQueueItem: (id: string, patch: Partial<UploadItem>) => void;
   removeFromQueue: (id: string) => void;
@@ -40,6 +44,7 @@ export const useFileStore = create<FileState>((set) => ({
   currentFolder: "/",
   selectedIds: [],
   selectedIdsSet: new Set<string>(),
+  draggedItemIds: [],
   isLoading: false,
   isSyncing: false,
   uploadQueue: [],
@@ -68,6 +73,8 @@ export const useFileStore = create<FileState>((set) => ({
   setSelectedIds: (selectedIds) =>
     set({ selectedIds, selectedIdsSet: new Set(selectedIds) }),
   clearSelection: () => set({ selectedIds: [], selectedIdsSet: new Set() }),
+  setDraggedItemIds: (draggedItemIds) => set({ draggedItemIds }),
+  clearDraggedItemIds: () => set({ draggedItemIds: [] }),
   addToQueue: (item) =>
     set((state) => ({ uploadQueue: [...state.uploadQueue, item] })),
   updateQueueItem: (id, patch) =>

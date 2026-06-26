@@ -623,6 +623,79 @@ export function useFileActions() {
     });
   };
 
+  const moveMultipleFilesOrFolders = async (fileIds: string[], targetFolderPath: string) => {
+    if (fileIds.length === 0) return;
+    return fileActionQueue.enqueue(async () => {
+      try {
+        const channelId = await getChannelId();
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          
+          // Map of moves to apply
+          const updatedFiles = files.map((f) => {
+            if (!fileIds.includes(f.id)) return f;
+            
+            const isFolder = f.mime === "inode/directory";
+            const oldFolderPath = f.folderPath;
+            if (oldFolderPath === targetFolderPath) return f;
+
+            if (isFolder) {
+              const folderFullPath = oldFolderPath === "/" 
+                ? `/${f.name}` 
+                : `${oldFolderPath}/${f.name}`;
+
+              // Prevent moving a folder into itself or its subfolders
+              if (targetFolderPath === folderFullPath || targetFolderPath.startsWith(folderFullPath + "/")) {
+                throw new Error(`Cannot move folder "${f.name}" into itself or its subfolders.`);
+              }
+            }
+
+            return { ...f, folderPath: targetFolderPath };
+          });
+
+          // Now propagate folderPath updates for children of moved folders
+          const movedFolders = files.filter(f => fileIds.includes(f.id) && f.mime === "inode/directory");
+          
+          const finalFiles = updatedFiles.map((f) => {
+            if (fileIds.includes(f.id)) return f;
+
+            for (const parentFolder of movedFolders) {
+              const oldParentPath = parentFolder.folderPath;
+              const folderFullPath = oldParentPath === "/" 
+                ? `/${parentFolder.name}` 
+                : `${oldParentPath}/${parentFolder.name}`;
+
+              if (targetFolderPath === folderFullPath || targetFolderPath.startsWith(folderFullPath + "/")) {
+                continue; // skipped in first loop, but safe check
+              }
+
+              const targetFullPath = targetFolderPath === "/" 
+                ? `/${parentFolder.name}` 
+                : `${targetFolderPath}/${parentFolder.name}`;
+
+              if (f.folderPath === folderFullPath) {
+                return { ...f, folderPath: targetFullPath };
+              }
+              if (f.folderPath.startsWith(folderFullPath + "/")) {
+                return { ...f, folderPath: targetFullPath + f.folderPath.substring(folderFullPath.length) };
+              }
+            }
+            return f;
+          });
+
+          await saveIndex(channelId, finalFiles);
+          setFiles(finalFiles);
+        });
+
+        toast.success(`Successfully moved ${fileIds.length} item(s)`);
+      } catch (err: any) {
+        console.error("Failed to move items:", err);
+        toast.error(err.message || "Failed to move items");
+      }
+    });
+  };
+
   return {
     isOperating,
     createFolder,
@@ -640,5 +713,6 @@ export function useFileActions() {
     archiveMultiple,
     unarchiveMultiple,
     toggleOffline,
+    moveMultipleFilesOrFolders,
   };
 }

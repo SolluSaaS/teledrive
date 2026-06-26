@@ -1,6 +1,6 @@
 import { getClient } from "./client";
 import { ensureStorageChannel } from "./channelManager";
-import { loadIndex, saveIndex, withTimeout } from "../storage/metadataStore";
+import { loadIndex, saveIndex, withTimeout, reconstructMissingFolders } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
 import { TeleFile } from "../types";
 import { invoke } from "@tauri-apps/api/core";
@@ -133,10 +133,11 @@ export async function bootstrapTeleDrive(
         if (newOrphans.length > 0) {
           console.log(`[bootstrap] Background orphan scan: Recovering ${newOrphans.length} orphaned file(s)…`);
           const mergedFiles = [...latestFiles, ...newOrphans];
-          useFileStore.getState().setFiles(mergedFiles);
+          const { healedFiles } = reconstructMissingFolders(mergedFiles, channelId);
+          useFileStore.getState().setFiles(healedFiles);
           
           // Persist the recovered entries (saveIndex will clean up duplicates first)
-          await saveIndex(channelId, mergedFiles);
+          await saveIndex(channelId, healedFiles);
         }
       }
     } catch (scanErr: any) {
