@@ -159,3 +159,19 @@
 .animate-slide-up-fade {
   animation: slideUpFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* Custom Drag and Drop helper: disable pointer events on children during drags to avoid relatedTarget null bugs in WebKit/Tauri */
+.dragging-active [data-folder-id] *,
+.dragging-active .pointer-events-none-children * {
+  pointer-events: none !important;
+}
+
+/* Enable native dragging in WebKit/Tauri and disable default dragging on images/SVGs */
+[draggable="true"] {
+  -webkit-user-drag: element !important;
+}
+
+img, svg {
+  -webkit-user-drag: none;
+  user-drag: none;
+}

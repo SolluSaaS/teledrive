@@ -106,7 +106,7 @@ export function useFileActions() {
         const fileToRename = allFiles.find((f) => f.id === fileId);
         if (!fileToRename) throw new Error("File not found");
 
-        const isFolder = fileToRename.mime === "inode/directory";
+        const isFolder = fileToRename.mime === "inode/directory" || fileToRename.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -169,7 +169,7 @@ export function useFileActions() {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
-        const isFolder = file.mime === "inode/directory";
+        const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -205,7 +205,7 @@ export function useFileActions() {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
-        const isFolder = file.mime === "inode/directory";
+        const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -241,7 +241,7 @@ export function useFileActions() {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
-        const isFolder = file.mime === "inode/directory";
+        const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -277,7 +277,7 @@ export function useFileActions() {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
-        const isFolder = file.mime === "inode/directory";
+        const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -317,7 +317,7 @@ export function useFileActions() {
         const fileToDelete = allFiles.find((f) => f.id === fileId);
         if (!fileToDelete) throw new Error("File not found");
 
-        const isFolder = fileToDelete.mime === "inode/directory";
+        const isFolder = fileToDelete.mime === "inode/directory" || fileToDelete.mime === "application/x-directory";
         let updated: TeleFile[];
 
         if (isFolder) {
@@ -636,7 +636,7 @@ export function useFileActions() {
           const updatedFiles = files.map((f) => {
             if (!fileIds.includes(f.id)) return f;
             
-            const isFolder = f.mime === "inode/directory";
+            const isFolder = f.mime === "inode/directory" || f.mime === "application/x-directory";
             const oldFolderPath = f.folderPath;
             if (oldFolderPath === targetFolderPath) return f;
 
@@ -655,7 +655,7 @@ export function useFileActions() {
           });
 
           // Now propagate folderPath updates for children of moved folders
-          const movedFolders = files.filter(f => fileIds.includes(f.id) && f.mime === "inode/directory");
+          const movedFolders = files.filter(f => fileIds.includes(f.id) && (f.mime === "inode/directory" || f.mime === "application/x-directory"));
           
           const finalFiles = updatedFiles.map((f) => {
             if (fileIds.includes(f.id)) return f;

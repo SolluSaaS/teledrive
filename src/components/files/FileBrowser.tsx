@@ -191,6 +191,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const [draggedId, setDraggedId] = useState<string | null>(null);
   // Ref so drop handlers always see the current hover target (no stale closure)
   const dragOverIdRef = useRef<string | null>(null);
+  const hasDroppedRef = useRef(false);
+  const dragStartTimeoutRef = useRef<any>(null);
+
+  const draggedItemIds = useFileStore((state) => state.draggedItemIds);
+  const isDraggingActive = draggedId !== null || draggedItemIds.length > 0;
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -341,64 +346,107 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   }, [clearSelection, navigate, toastPreview]);
 
   const handleDragStart = (e: React.DragEvent, file: TeleFile) => {
+    hasDroppedRef.current = false;
+
+    // Clear any existing drag start timeout
+    if (dragStartTimeoutRef.current) {
+      clearTimeout(dragStartTimeoutRef.current);
+      dragStartTimeoutRef.current = null;
+    }
+
     // Determine which IDs are being dragged (respect multi-selection)
     const dragIds = selectedIdsSet.has(file.id) ? [...selectedIds] : [file.id];
 
-    // ① Module-level var: most reliable, no React state lag
+    // ① Module-level var: set synchronously so it's instantly available
     _dndActiveDragIds = dragIds;
-    // ② Zustand store: lets DriveLayout sidebar drop also work
-    useFileStore.getState().setDraggedItemIds(dragIds);
-    // ③ dataTransfer: best-effort for non-Tauri environments
-    try { e.dataTransfer.setData("text/plain", JSON.stringify(dragIds)); } catch { /* ignore */ }
 
-    e.dataTransfer.effectAllowed = "move";
-    setDraggedId(file.id);
+    // ② Set dataTransfer synchronously (this MUST happen during the dragstart event)
+    try {
+      e.dataTransfer.setData("text/plain", JSON.stringify(dragIds));
+      e.dataTransfer.effectAllowed = "move";
+    } catch { /* ignore */ }
+
+    // ③ Defer React and Zustand state updates to the next tick to prevent WebKit/Tauri
+    // from instantly aborting the drag operation when the DOM changes.
+    dragStartTimeoutRef.current = setTimeout(() => {
+      useFileStore.getState().setDraggedItemIds(dragIds);
+      setDraggedId(file.id);
+      dragStartTimeoutRef.current = null;
+    }, 50);
   };
 
   const handleDragEnd = () => {
-    // Clean up all drag state on drag cancel or end
-    _dndActiveDragIds = [];
-    dragOverIdRef.current = null;
-    useFileStore.getState().clearDraggedItemIds();
-    setDraggedId(null);
-    setDragOverId(null);
+    // Clear the drag start timeout if drag ended before it even fired
+    if (dragStartTimeoutRef.current) {
+      clearTimeout(dragStartTimeoutRef.current);
+      dragStartTimeoutRef.current = null;
+    }
+
+    // Delay state cleanup to let the drop event run first.
+    // If it was dropped, the drop handler will have set hasDroppedRef.current to true.
+    setTimeout(() => {
+      if (!hasDroppedRef.current) {
+        _dndActiveDragIds = [];
+        dragOverIdRef.current = null;
+        useFileStore.getState().clearDraggedItemIds();
+        setDraggedId(null);
+        setDragOverId(null);
+      }
+    }, 200); // 200ms is a safe window
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOverCard = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
+    if (dragOverIdRef.current !== targetId) {
+      dragOverIdRef.current = targetId;
+      setDragOverId(targetId);
+    }
   };
 
-  const handleDragEnter = (e: React.DragEvent, targetId: string) => {
+  const handleDrop = async (e: React.DragEvent, targetFolderId: string) => {
     e.preventDefault();
-    dragOverIdRef.current = targetId; // ref — always current, no stale closure
-    setDragOverId(targetId);           // state — for visual re-render
-  };
+    e.stopPropagation();
 
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    // Only clear when truly leaving (not entering a child element)
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    dragOverIdRef.current = null;
-    setDragOverId(null);
-  };
+    hasDroppedRef.current = true; // prevent handleDragEnd from clearing state prematurely
 
-  /**
-   * Primary drop handler on individual folder cards.
-   * Uses module-level _dndActiveDragIds for reliability in Tauri WebKit.
-   */
-  const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
-    e.preventDefault();
-    e.stopPropagation(); // prevent bubbling to global handler below
+    // Prefer the global array, but fallback to the event dataTransfer or Zustand store
+    let fileIds = [..._dndActiveDragIds];
+    if (fileIds.length === 0) {
+      try {
+        const raw = e.dataTransfer.getData("text/plain");
+        if (raw) {
+          fileIds = JSON.parse(raw);
+        }
+      } catch {
+        fileIds = useFileStore.getState().draggedItemIds || [];
+      }
+    }
 
-    const fileIds = [..._dndActiveDragIds];
+    // Reset all drag state immediately
     _dndActiveDragIds = [];
     dragOverIdRef.current = null;
     useFileStore.getState().clearDraggedItemIds();
     setDragOverId(null);
     setDraggedId(null);
 
-    if (fileIds.length === 0) return;
+    if (fileIds.length === 0 || !targetFolderId) return;
+
+    let targetFolderPath = "";
+    if (targetFolderId.startsWith("/")) {
+      targetFolderPath = targetFolderId;
+    } else {
+      const allFiles = useFileStore.getState().files;
+      const targetFolder = allFiles.find((f) => f.id === targetFolderId);
+      if (!targetFolder) return;
+      const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
+      if (!isDir) return;
+
+      targetFolderPath =
+        targetFolder.folderPath === "/"
+          ? `/${targetFolder.name}`
+          : `${targetFolder.folderPath}/${targetFolder.name}`;
+    }
 
     try {
       await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
@@ -409,16 +457,36 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   };
 
   /**
-   * Global fallback drop handler — fires when onDrop on a specific folder card
-   * doesn't trigger (a known issue in Tauri WebKit).
-   * Uses dragOverIdRef.current to identify the hover target at the time of drop.
+   * Unified dragover handler for the scrollable container.
+   * If the target is the container itself (empty space), we clear the hover highlight.
+   */
+  const handleGlobalDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+
+    if (e.target === e.currentTarget) {
+      if (dragOverIdRef.current !== null) {
+        dragOverIdRef.current = null;
+        setDragOverId(null);
+      }
+    }
+  }, []);
+
+  /**
+   * Global drop handler on the scrollable container.
+   * Fallback for dropping into the current folder.
    */
   const handleGlobalDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const targetFolderId = dragOverIdRef.current;
-    const fileIds = [..._dndActiveDragIds];
+    hasDroppedRef.current = true;
+
+    // Resolve target path (if dropping into empty space of current folder, path is folderPath)
+    const targetFolderPath = folderPath;
+    const fileIds = [..._dndActiveDragIds].length > 0 
+      ? [..._dndActiveDragIds] 
+      : useFileStore.getState().draggedItemIds || [];
 
     // Reset all drag state
     _dndActiveDragIds = [];
@@ -427,28 +495,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     setDragOverId(null);
     setDraggedId(null);
 
-    if (fileIds.length === 0 || !targetFolderId) return;
-
-    // Resolve folder path by looking up the folder by ID
-    const allFiles = useFileStore.getState().files;
-    const targetFolder = allFiles.find((f) => f.id === targetFolderId);
-    if (!targetFolder) return;
-    const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
-    if (!isDir) return;
-
-    const folderPath =
-      targetFolder.folderPath === "/"
-        ? `/${targetFolder.name}`
-        : `${targetFolder.folderPath}/${targetFolder.name}`;
+    if (fileIds.length === 0 || !targetFolderPath) return;
 
     try {
-      await moveMultipleFilesOrFolders(fileIds, folderPath);
+      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
       clearSelection();
     } catch (err) {
       console.error("[DnD] handleGlobalDrop failed:", err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveMultipleFilesOrFolders, clearSelection]);
+  }, [moveMultipleFilesOrFolders, clearSelection, folderPath]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -613,7 +669,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   };
 
   return (
-    <div className="flex flex-col h-full p-4 md:p-6 lg:p-8 space-y-6">
+    <div className={cn("flex flex-col h-full p-4 md:p-6 lg:p-8 space-y-6", isDraggingActive && "dragging-active")}>
       {/* File Browser Header Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-200 dark:border-slate-800/60 pb-4 shrink-0">
         <div className="space-y-1.5">
@@ -625,12 +681,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <Link
                 to="/drive/my-drive"
                 onClick={clearSelection}
-                onDragOver={handleDragOver}
-                onDragEnter={(e) => handleDragEnter(e, "crumb_home")}
-                onDragLeave={handleDragLeave}
+                onDragOver={(e) => handleDragOverCard(e, "crumb_home")}
                 onDrop={(e) => handleDrop(e, "/")}
                 className={cn(
                   "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                  isDraggingActive && "pointer-events-none-children",
                   dragOverId === "crumb_home" && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
                 )}
               >
@@ -649,15 +704,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     <Link
                       to={crumb.link}
                       onClick={clearSelection}
-                      onDragOver={handleDragOver}
-                      onDragEnter={(e) => handleDragEnter(e, `crumb_${crumb.link}`)}
-                      onDragLeave={handleDragLeave}
+                      onDragOver={(e) => handleDragOverCard(e, `crumb_${crumb.link}`)}
                       onDrop={(e) => {
                         const targetPath = crumb.link.substring("/drive/folder".length);
                         handleDrop(e, targetPath);
                       }}
                       className={cn(
                         "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                        isDraggingActive && "pointer-events-none-children",
                         dragOverId === `crumb_${crumb.link}` && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
                       )}
                     >
@@ -829,7 +883,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         /* GRID VIEW */
         <div
           className="flex-1 overflow-y-auto min-h-0 select-none pb-20 pr-1 space-y-8"
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+          onDragOver={handleGlobalDragOver}
           onDrop={handleGlobalDrop}
         >
           {/* Folders Section */}
@@ -865,15 +919,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         draggable={true}
                         onDragStart={(e) => handleDragStart(e, folder)}
                         onDragEnd={handleDragEnd}
-                        onDragOver={handleDragOver}
-                        onDragEnter={(e) => handleDragEnter(e, folder.id)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => {
-                          const folderPathPrefix = folder.folderPath === "/" 
-                            ? `/${folder.name}` 
-                            : `${folder.folderPath}/${folder.name}`;
-                          handleDrop(e, folderPathPrefix);
-                        }}
+                        onDragOver={(e) => handleDragOverCard(e, folder.id)}
+                        onDrop={(e) => handleDrop(e, folder.id)}
+                        data-folder-id={folder.id}
                         style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                         className={cn(
                           "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none animate-slide-up-fade",
@@ -886,7 +934,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         )}
                       >
                         {/* Drop-target "+" badge — only visible while dragging over this folder */}
-                        {dragOverId === folder.id && draggedId !== null && (
+                        {dragOverId === folder.id && isDraggingActive && (
                           <span className="absolute top-1.5 right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 shadow pointer-events-none">
                             <Plus className="h-3 w-3 text-white" />
                           </span>
@@ -1008,7 +1056,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 shadow-xs">
+        <div
+          className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 shadow-xs"
+          onDragOver={handleGlobalDragOver}
+          onDrop={handleGlobalDrop}
+        >
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-150 dark:border-slate-800 text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider select-none bg-slate-50/50 dark:bg-slate-950/20">
@@ -1062,16 +1114,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       draggable={true}
                       onDragStart={(e) => handleDragStart(e, file)}
                       onDragEnd={handleDragEnd}
-                      onDragOver={(e) => isDir && handleDragOver(e)}
-                      onDragEnter={(e) => isDir && handleDragEnter(e, file.id)}
-                      onDragLeave={(e) => isDir && handleDragLeave(e)}
-                      onDrop={(e) => {
-                        if (!isDir) return;
-                        const folderPathPrefix = file.folderPath === "/" 
-                          ? `/${file.name}` 
-                          : `${file.folderPath}/${file.name}`;
-                        handleDrop(e, folderPathPrefix);
-                      }}
+                      onDragOver={(e) => isDir && handleDragOverCard(e, file.id)}
+                      onDrop={(e) => isDir && handleDrop(e, file.id)}
+                      {...(isDir ? { 'data-folder-id': file.id } : {})}
                       style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                       className={cn(
                         "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150 animate-slide-up-fade",
