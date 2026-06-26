@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
 import { triggerFilePicker, triggerFolderPicker } from "@/lib/upload/fileSelector";
@@ -39,6 +39,7 @@ export default function DriveLayout() {
     moveMultipleFilesOrFolders,
     moveMultipleToTrash,
     archiveMultiple,
+    starMultiple,
   } = useFileActions();
 
   const [previewFile, setPreviewFile] = useState<TeleFile | null>(null);
@@ -62,15 +63,20 @@ export default function DriveLayout() {
     };
   }, []);
 
+  const actionableSidebarPaths = useMemo(
+    () => new Set(["/drive/my-drive", "/drive/starred", "/drive/archived", "/drive/trash"]),
+    [],
+  );
+
   const handleSidebarDragOver = (e: React.DragEvent, path: string) => {
-    if (["/drive/my-drive", "/drive/archived", "/drive/trash"].includes(path)) {
+    if (actionableSidebarPaths.has(path)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
     }
   };
 
   const handleSidebarDragEnter = (e: React.DragEvent, path: string) => {
-    if (["/drive/my-drive", "/drive/archived", "/drive/trash"].includes(path)) {
+    if (actionableSidebarPaths.has(path)) {
       e.preventDefault();
       setSidebarDragOverPath(path);
     }
@@ -107,6 +113,8 @@ export default function DriveLayout() {
 
     if (path === "/drive/my-drive") {
       await moveMultipleFilesOrFolders(fileIds, "/");
+    } else if (path === "/drive/starred") {
+      await starMultiple(fileIds);
     } else if (path === "/drive/trash") {
       await moveMultipleToTrash(fileIds);
     } else if (path === "/drive/archived") {
@@ -239,12 +247,30 @@ export default function DriveLayout() {
       }
     };
 
+    const handleInternalSidebarDrop = async (e: Event) => {
+      const detail = (e as CustomEvent<{ target: string; fileIds: string[] }>).detail;
+      if (!detail?.target || !Array.isArray(detail.fileIds) || detail.fileIds.length === 0) return;
+
+      if (detail.target === "/drive/my-drive") {
+        await moveMultipleFilesOrFolders(detail.fileIds, "/");
+      } else if (detail.target === "/drive/starred") {
+        await starMultiple(detail.fileIds);
+      } else if (detail.target === "/drive/trash") {
+        await moveMultipleToTrash(detail.fileIds);
+      } else if (detail.target === "/drive/archived") {
+        await archiveMultiple(detail.fileIds);
+      }
+
+      useFileStore.getState().clearSelection();
+    };
+
     window.addEventListener("teledrive-trigger-upload", handleUploadTrigger);
     window.addEventListener("teledrive-trigger-folder-upload", handleFolderUploadTrigger);
     window.addEventListener("teledrive-download-file", handleDownloadTrigger);
     window.addEventListener("teledrive-preview-file", handlePreviewTrigger);
     window.addEventListener("teledrive-edit-file", handleEditTrigger);
     window.addEventListener("teledrive-refresh-files", handleRefreshFiles);
+    window.addEventListener("teledrive-sidebar-drop-action", handleInternalSidebarDrop);
     
     return () => {
       window.removeEventListener("teledrive-trigger-upload", handleUploadTrigger);
@@ -253,8 +279,9 @@ export default function DriveLayout() {
       window.removeEventListener("teledrive-preview-file", handlePreviewTrigger);
       window.removeEventListener("teledrive-edit-file", handleEditTrigger);
       window.removeEventListener("teledrive-refresh-files", handleRefreshFiles);
+      window.removeEventListener("teledrive-sidebar-drop-action", handleInternalSidebarDrop);
     };
-  }, []);
+  }, [archiveMultiple, moveMultipleFilesOrFolders, moveMultipleToTrash, phoneNumber, starMultiple]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     const mainEl = e.currentTarget;
@@ -305,6 +332,13 @@ export default function DriveLayout() {
 
   const files = useFileStore((state) => state.files);
   const isSyncing = useFileStore((state) => state.isSyncing);
+  const draggedItemIds = useFileStore((state) => state.draggedItemIds);
+
+  useEffect(() => {
+    if (draggedItemIds.length === 0) {
+      setSidebarDragOverPath(null);
+    }
+  }, [draggedItemIds]);
 
   // Only sum active (non-trashed) file sizes; guard against NaN from BigInt
   const safeSize = (raw: unknown): number => {
@@ -335,18 +369,42 @@ export default function DriveLayout() {
     return cleaned.slice(0, 2).toUpperCase() || "TD";
   };
 
-  const archivedCount = files.filter((f) => f.archived && !f.trashed).length;
-  const starredCount  = files.filter((f) => f.starred && !f.trashed && !f.archived).length;
-  const trashCount    = files.filter((f) => f.trashed).length;
-  const totalCount    = files.filter((f) => !f.trashed && !f.archived).length;
+  const { archivedCount, starredCount, trashCount, totalCount } = useMemo(() => {
+    let archived = 0;
+    let starred = 0;
+    let trash = 0;
+    let total = 0;
 
-  const navItems = [
-    { label: "My Drive",  icon: HardDrive, path: "/drive/my-drive",  badge: totalCount },
-    { label: "Recent",   icon: Clock,      path: "/drive/recent" },
-    { label: "Starred",  icon: Star,       path: "/drive/starred",   badge: starredCount },
-    { label: "Archived", icon: Archive,    path: "/drive/archived",  badge: archivedCount },
-    { label: "Trash",    icon: Trash2,     path: "/drive/trash",     badge: trashCount },
-  ];
+    for (const file of files) {
+      if (file.trashed) {
+        trash += 1;
+        continue;
+      }
+
+      if (file.archived) {
+        archived += 1;
+        continue;
+      }
+
+      total += 1;
+      if (file.starred) starred += 1;
+    }
+
+    return {
+      archivedCount: archived,
+      starredCount: starred,
+      trashCount: trash,
+      totalCount: total,
+    };
+  }, [files]);
+
+  const navItems = useMemo(() => [
+    { label: "My Drive",  icon: HardDrive, path: "/drive/my-drive",  badge: totalCount, dropTarget: "nav:/drive/my-drive" },
+    { label: "Recent",   icon: Clock,      path: "/drive/recent", dropTarget: null },
+    { label: "Starred",  icon: Star,       path: "/drive/starred",   badge: starredCount, dropTarget: "nav:/drive/starred" },
+    { label: "Archived", icon: Archive,    path: "/drive/archived",  badge: archivedCount, dropTarget: "nav:/drive/archived" },
+    { label: "Trash",    icon: Trash2,     path: "/drive/trash",     badge: trashCount, dropTarget: "nav:/drive/trash" },
+  ], [archivedCount, starredCount, totalCount, trashCount]);
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-slate-50/20 dark:bg-slate-900/5 select-none">
@@ -366,6 +424,17 @@ export default function DriveLayout() {
               onDragEnter={(e) => handleSidebarDragEnter(e, item.path)}
               onDragLeave={handleSidebarDragLeave}
               onDrop={(e) => handleSidebarDrop(e, item.path)}
+              onMouseEnter={() => {
+                if (draggedItemIds.length > 0 && actionableSidebarPaths.has(item.path)) {
+                  setSidebarDragOverPath(item.path);
+                }
+              }}
+              onMouseLeave={() => {
+                if (draggedItemIds.length > 0 && sidebarDragOverPath === item.path) {
+                  setSidebarDragOverPath(null);
+                }
+              }}
+              data-drop-target={item.dropTarget ?? undefined}
               className={cn(
                 "flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative group cursor-pointer border",
                 isActive
@@ -558,7 +627,7 @@ export default function DriveLayout() {
               <Loader2 className={cn("h-4.5 w-4.5 text-brand-500", isRefreshing && "animate-spin")} />
             </div>
           )}
-          <div key={location.pathname} className="animate-slide-up-fade min-h-full w-full">
+          <div className="animate-slide-up-fade min-h-full w-full">
             <Outlet />
           </div>
         </main>

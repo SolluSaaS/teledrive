@@ -53,6 +53,7 @@ import {
 import { fuzzySearch } from "@/lib/search/searchEngine";
 import { getFileCategory, getFileIconType } from "@/lib/files/fileUtils";
 import { isEditableFile } from "@/lib/files/editableTypes";
+import { useFileBrowserDragAndDrop } from "@/hooks/useFileBrowserDragAndDrop";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -70,7 +71,7 @@ function formatFileSize(bytes: unknown): string {
 // Utility: human-readable file type
 // ---------------------------------------------------------------------------
 function getFileType(file: TeleFile): string {
-  const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
+  const isDir = isDirectory(file);
   if (isDir) return "Folder";
   
   const ext = file.name.split(".").pop()?.toLowerCase();
@@ -132,12 +133,10 @@ function getFileType(file: TeleFile): string {
   }
 }
 
+function isDirectory(file: TeleFile): boolean {
+  return file.mime === "inode/directory" || file.mime === "application/x-directory";
+}
 
-// ---------------------------------------------------------------------------
-// Module-level drag state — immune to React re-renders and stale closures.
-// ---------------------------------------------------------------------------
-let _dndActiveDragIds: string[] = [];
-const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
 
 const fileHoverStyles: Record<string, string> = {
   image: "hover:border-rose-300/80 dark:hover:border-rose-800/60 hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.35)]",
@@ -158,31 +157,16 @@ interface FileBrowserProps {
   searchQuery?: string;
 }
 
-interface InternalDragState {
-  ids: string[];
-  sourceId: string;
-  previewFile: TeleFile;
-  previewVariant: "folder-grid" | "file-grid" | "list-row";
-  x: number;
-  y: number;
-  offsetX: number;
-  offsetY: number;
-  width: number;
-  height: number;
-}
-
 export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = "" }: FileBrowserProps) {
   const navigate = useNavigate();
-  const {
-    files,
-    selectedIds,
-    selectedIdsSet,
-    isLoading,
-    setFolder,
-    toggleSelect,
-    setSelectedIds,
-    clearSelection,
-  } = useFileStore();
+  const files = useFileStore((state) => state.files);
+  const selectedIds = useFileStore((state) => state.selectedIds);
+  const selectedIdsSet = useFileStore((state) => state.selectedIdsSet);
+  const isLoading = useFileStore((state) => state.isLoading);
+  const setFolder = useFileStore((state) => state.setFolder);
+  const toggleSelect = useFileStore((state) => state.toggleSelect);
+  const setSelectedIds = useFileStore((state) => state.setSelectedIds);
+  const clearSelection = useFileStore((state) => state.clearSelection);
 
   const {
     viewMode,
@@ -214,229 +198,26 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const touchTimeoutRef = useRef<any>(null);
   const [mobileContextFile, setMobileContextFile] = useState<TeleFile | null>(null);
 
-  // Drag and Drop state
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [internalDrag, setInternalDrag] = useState<InternalDragState | null>(null);
-  // Ref so drop handlers always see the current hover target (no stale closure)
-  const dragOverIdRef = useRef<string | null>(null);
-  const hasDroppedRef = useRef(false);
-  const dragCandidateRef = useRef<{
-    file: TeleFile;
-    previewVariant: "folder-grid" | "file-grid" | "list-row";
-    startX: number;
-    startY: number;
-    offsetX: number;
-    offsetY: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const suppressClickRef = useRef(false);
-
-  const draggedItemIds = useFileStore((state) => state.draggedItemIds);
-  const isDraggingActive = draggedId !== null || draggedItemIds.length > 0;
-
-  const resetDragState = useCallback(() => {
-    _dndActiveDragIds = [];
-    dragOverIdRef.current = null;
-    hasDroppedRef.current = false;
-    dragCandidateRef.current = null;
-    useFileStore.getState().clearDraggedItemIds();
-    setDragOverId(null);
-    setDraggedId(null);
-    setInternalDrag(null);
-  }, []);
-
-  const resolveDraggedIds = useCallback((e?: React.DragEvent): string[] => {
-    if (_dndActiveDragIds.length > 0) {
-      return [..._dndActiveDragIds];
-    }
-
-    const rawPayloads: string[] = [];
-    if (e) {
-      try {
-        rawPayloads.push(e.dataTransfer.getData(DND_PAYLOAD_MIME));
-      } catch {
-        // ignore
-      }
-      try {
-        rawPayloads.push(e.dataTransfer.getData("text/plain"));
-      } catch {
-        // ignore
-      }
-    }
-
-    for (const raw of rawPayloads) {
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.every((id) => typeof id === "string")) {
-          return parsed;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    const fallbackIds = useFileStore.getState().draggedItemIds;
-    return Array.isArray(fallbackIds) ? [...fallbackIds] : [];
-  }, []);
-
-  const resolveTargetFolderPath = useCallback((targetFolderId: string): string | null => {
-    if (!targetFolderId) return null;
-    if (targetFolderId.startsWith("/")) return targetFolderId;
-
-    const allFiles = useFileStore.getState().files;
-    const targetFolder = allFiles.find((f) => f.id === targetFolderId);
-    if (!targetFolder) return null;
-
-    const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
-    if (!isDir) return null;
-
-    return targetFolder.folderPath === "/"
-      ? `/${targetFolder.name}`
-      : `${targetFolder.folderPath}/${targetFolder.name}`;
-  }, []);
-
-  const resolveFolderIdFromEvent = useCallback((e: React.DragEvent): string | null => {
-    const target = e.target;
-    if (!(target instanceof Element)) return null;
-    const folderElement = target.closest("[data-folder-id]");
-    return folderElement?.getAttribute("data-folder-id") ?? null;
-  }, []);
-
-  const resolveFolderIdFromPoint = useCallback((x: number, y: number): string | null => {
-    const element = document.elementFromPoint(x, y);
-    if (!(element instanceof Element)) return null;
-    const folderElement = element.closest("[data-folder-id]");
-    return folderElement?.getAttribute("data-folder-id") ?? null;
-  }, []);
-
-  const moveDraggedItems = useCallback(async (fileIds: string[], targetFolderId: string | null) => {
-    if (fileIds.length === 0 || !targetFolderId) return;
-    const targetFolderPath = resolveTargetFolderPath(targetFolderId);
-    if (!targetFolderPath) return;
-
-    try {
-      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
-      clearSelection();
-    } catch (err) {
-      console.error("[DnD] moveDraggedItems failed:", err);
-    }
-  }, [clearSelection, moveMultipleFilesOrFolders, resolveTargetFolderPath]);
-
-  const startInternalDrag = useCallback((
-    file: TeleFile,
-    previewVariant: "folder-grid" | "file-grid" | "list-row",
-    clientX: number,
-    clientY: number,
-    offsetX: number,
-    offsetY: number,
-    width: number,
-    height: number,
-  ) => {
-    const dragIds = selectedIdsSet.has(file.id) ? [...selectedIds] : [file.id];
-    _dndActiveDragIds = dragIds;
-    useFileStore.getState().setDraggedItemIds(dragIds);
-    setDraggedId(file.id);
-    setInternalDrag({
-      ids: dragIds,
-      sourceId: file.id,
-      previewFile: file,
-      previewVariant,
-      x: clientX,
-      y: clientY,
-      offsetX,
-      offsetY,
-      width,
-      height,
-    });
-  }, [selectedIds, selectedIdsSet]);
-
-  const handlePointerDown = useCallback((
-    e: React.MouseEvent,
-    file: TeleFile,
-    previewVariant: "folder-grid" | "file-grid" | "list-row",
-  ) => {
-    if (isMobile || e.button !== 0) return;
-    const target = e.target;
-    if (target instanceof Element && target.closest("[data-no-drag]")) return;
-
-    const currentTarget = e.currentTarget;
-    if (!(currentTarget instanceof Element)) return;
-    const rect = currentTarget.getBoundingClientRect();
-
-    dragCandidateRef.current = {
-      file,
-      previewVariant,
-      startX: e.clientX,
-      startY: e.clientY,
-      offsetX: e.clientX - rect.left,
-      offsetY: e.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    };
-    suppressClickRef.current = false;
-  }, [isMobile]);
-
-  useEffect(() => {
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      const candidate = dragCandidateRef.current;
-      if (candidate && !internalDrag) {
-        const dx = e.clientX - candidate.startX;
-        const dy = e.clientY - candidate.startY;
-        if (Math.hypot(dx, dy) < 6) return;
-
-        suppressClickRef.current = true;
-        startInternalDrag(
-          candidate.file,
-          candidate.previewVariant,
-          e.clientX,
-          e.clientY,
-          candidate.offsetX,
-          candidate.offsetY,
-          candidate.width,
-          candidate.height,
-        );
-      }
-
-      if (!internalDrag && !candidate) return;
-
-      const activeDrag = internalDrag ?? (candidate ? {
-        ids: selectedIdsSet.has(candidate.file.id) ? [...selectedIds] : [candidate.file.id],
-        sourceId: candidate.file.id,
-      } : null);
-
-      if (!activeDrag || !internalDrag) return;
-
-      const folderId = resolveFolderIdFromPoint(e.clientX, e.clientY);
-      const validHoverId = folderId && !activeDrag.ids.includes(folderId) ? folderId : null;
-      dragOverIdRef.current = validHoverId;
-      setDragOverId(validHoverId);
-      setInternalDrag((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : prev);
-    };
-
-    const handleWindowMouseUp = () => {
-      dragCandidateRef.current = null;
-      if (!internalDrag) return;
-
-      const draggedIds = [...internalDrag.ids];
-      const targetFolderId = dragOverIdRef.current;
-      resetDragState();
-      void moveDraggedItems(draggedIds, targetFolderId);
-
-      window.setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
-    };
-
-    window.addEventListener("mousemove", handleWindowMouseMove);
-    window.addEventListener("mouseup", handleWindowMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleWindowMouseMove);
-      window.removeEventListener("mouseup", handleWindowMouseUp);
-    };
-  }, [internalDrag, moveDraggedItems, resetDragState, resolveFolderIdFromPoint, selectedIds, selectedIdsSet, startInternalDrag]);
+  const {
+    dragOverId,
+    draggedId,
+    internalDrag,
+    isDraggingActive,
+    suppressClickRef,
+    handlePointerDown,
+    handleDragOverCard,
+    handleDrop,
+    handleGlobalDragOver,
+    handleGlobalDrop,
+  } = useFileBrowserDragAndDrop({
+    files,
+    folderPath,
+    isMobile,
+    selectedIds,
+    selectedIdsSet,
+    clearSelection,
+    moveMultipleFilesOrFolders,
+  });
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -451,7 +232,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   // Update current folder path in store on mount/change
   useEffect(() => {
     if (mode === "drive") {
-      setFolder(folderPath);
+      const currentFolder = useFileStore.getState().currentFolder;
+      if (currentFolder !== folderPath) {
+        setFolder(folderPath);
+      }
     }
   }, [folderPath, mode, setFolder]);
 
@@ -469,38 +253,62 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     }
   }, [sortBy]);
 
-  // Full filtered + sorted display list — only recomputed when its deps change
+  const activeSortBy = useMemo(
+    () => (mode === "recent" && sortBy === "name_asc" ? "date_desc" : sortBy),
+    [mode, sortBy],
+  );
+
+  const activeFiles = useMemo(
+    () => files.filter((file) => !file.trashed && !file.archived),
+    [files],
+  );
+
+  const folderEntriesIndex = useMemo(() => {
+    const index = new Map<string, TeleFile[]>();
+    for (const file of activeFiles) {
+      const bucket = index.get(file.folderPath);
+      if (bucket) {
+        bucket.push(file);
+      } else {
+        index.set(file.folderPath, [file]);
+      }
+    }
+    return index;
+  }, [activeFiles]);
+
+  const viewIndexes = useMemo(() => ({
+    starred: activeFiles.filter((file) => file.starred),
+    recent: activeFiles,
+    archived: files.filter((file) => file.archived && !file.trashed),
+    trash: files.filter((file) => file.trashed),
+  }), [activeFiles, files]);
+
+  // Full filtered + sorted display list — optimized for folder navigation
   const { displayFiles, folders, regularFiles } = useMemo(() => {
-    let filtered = [...files];
+    let filtered: TeleFile[];
 
     if (mode === "drive") {
-      filtered = filtered.filter((f) => f.folderPath === folderPath && !f.trashed && !f.archived);
+      filtered = [...(folderEntriesIndex.get(folderPath) ?? [])];
     } else if (mode === "starred") {
-      filtered = filtered.filter((f) => f.starred && !f.trashed && !f.archived);
+      filtered = [...viewIndexes.starred];
     } else if (mode === "recent") {
-      filtered = filtered.filter((f) => !f.trashed && !f.archived);
+      filtered = [...viewIndexes.recent];
     } else if (mode === "trash") {
-      filtered = filtered.filter((f) => f.trashed);
+      filtered = [...viewIndexes.trash];
     } else if (mode === "archived") {
-      filtered = filtered.filter((f) => f.archived && !f.trashed);
-    } else if (mode === "search") {
-      filtered = fuzzySearch(filtered.filter((f) => !f.trashed && !f.archived), searchQuery);
+      filtered = [...viewIndexes.archived];
+    } else {
+      filtered = fuzzySearch(activeFiles, searchQuery);
     }
 
-    // Apply category filter (folders always pass when a media filter is active)
-    if (filterType !== "All") {
-      filtered = filtered.filter((f) => {
-        const isDir = f.mime === "inode/directory" || f.mime === "application/x-directory";
-        if (isDir) return false;
-        return getFileCategory(f.name, f.mime) === filterType;
-      });
-    }
+    const visibleFiles =
+      filterType === "All"
+        ? filtered
+        : filtered.filter((f) => !isDirectory(f) && getFileCategory(f.name, f.mime) === filterType);
 
-    // Sort: Folders always first, then by active sortBy
-    const activeSortBy = mode === "recent" && sortBy === "name_asc" ? "date_desc" : sortBy;
-    filtered.sort((a, b) => {
-      const aIsDir = a.mime === "inode/directory" || a.mime === "application/x-directory";
-      const bIsDir = b.mime === "inode/directory" || b.mime === "application/x-directory";
+    visibleFiles.sort((a, b) => {
+      const aIsDir = isDirectory(a);
+      const bIsDir = isDirectory(b);
       if (aIsDir && !bIsDir) return -1;
       if (!aIsDir && bIsDir) return 1;
       switch (activeSortBy) {
@@ -514,10 +322,22 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       }
     });
 
-    const flds = filtered.filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory");
-    const regs = filtered.filter((f) => f.mime !== "inode/directory" && f.mime !== "application/x-directory");
-    return { displayFiles: filtered, folders: flds, regularFiles: regs };
-  }, [files, mode, folderPath, filterType, sortBy, searchQuery]);
+    const nextFolders: TeleFile[] = [];
+    const nextRegularFiles: TeleFile[] = [];
+    for (const file of visibleFiles) {
+      if (isDirectory(file)) {
+        nextFolders.push(file);
+      } else {
+        nextRegularFiles.push(file);
+      }
+    }
+
+    return {
+      displayFiles: visibleFiles,
+      folders: nextFolders,
+      regularFiles: nextRegularFiles,
+    };
+  }, [activeFiles, activeSortBy, filterType, folderEntriesIndex, folderPath, mode, searchQuery, viewIndexes]);
 
   // Breadcrumbs — only recompute when folderPath changes
   const breadcrumbs = useMemo(() => {
@@ -591,90 +411,6 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       toastPreview(file);
     }
   }, [clearSelection, navigate, toastPreview]);
-
-  const handleDragOverCard = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (dragOverIdRef.current !== targetId) {
-      dragOverIdRef.current = targetId;
-      setDragOverId(targetId);
-    }
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetFolderId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    hasDroppedRef.current = true; // prevent handleDragEnd from clearing state prematurely
-    const fileIds = resolveDraggedIds(e);
-    resetDragState();
-
-    if (fileIds.length === 0 || !targetFolderId) return;
-    const targetFolderPath = resolveTargetFolderPath(targetFolderId);
-    if (!targetFolderPath) return;
-
-    try {
-      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
-      clearSelection();
-    } catch (err) {
-      console.error("[DnD] handleDrop failed:", err);
-    }
-  };
-
-  /**
-   * Unified dragover handler for the scrollable container.
-   * If the target is the container itself (empty space), we clear the hover highlight.
-   */
-  const handleGlobalDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-
-    const internalDragIds = resolveDraggedIds(e);
-    if (internalDragIds.length === 0) return;
-
-    const targetFolderId = resolveFolderIdFromEvent(e);
-    if (targetFolderId) {
-      if (dragOverIdRef.current !== targetFolderId) {
-        dragOverIdRef.current = targetFolderId;
-        setDragOverId(targetFolderId);
-      }
-      return;
-    }
-
-    if (dragOverIdRef.current !== null) {
-      dragOverIdRef.current = null;
-      setDragOverId(null);
-    }
-  }, [resolveDraggedIds, resolveFolderIdFromEvent]);
-
-  /**
-   * Global drop handler on the scrollable container.
-   * Fallback for dropping into the current folder.
-   */
-  const handleGlobalDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    hasDroppedRef.current = true;
-
-    const fileIds = resolveDraggedIds(e);
-    const folderTargetId = resolveFolderIdFromEvent(e);
-    const targetFolderPath = folderTargetId
-      ? resolveTargetFolderPath(folderTargetId)
-      : folderPath;
-
-    resetDragState();
-
-    if (fileIds.length === 0 || !targetFolderPath) return;
-
-    try {
-      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
-      clearSelection();
-    } catch (err) {
-      console.error("[DnD] handleGlobalDrop failed:", err);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveMultipleFilesOrFolders, clearSelection, folderPath, resolveDraggedIds, resolveFolderIdFromEvent, resolveTargetFolderPath, resetDragState]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -853,6 +589,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 onClick={clearSelection}
                 onDragOver={(e) => handleDragOverCard(e, "crumb_home")}
                 onDrop={(e) => handleDrop(e, "/")}
+                data-drop-path="/"
                 className={cn(
                   "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
                   isDraggingActive && "pointer-events-none-children",
@@ -871,17 +608,18 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       {crumb.name}
                     </span>
                   ) : (
-                    <Link
-                      to={crumb.link}
-                      onClick={clearSelection}
-                      onDragOver={(e) => handleDragOverCard(e, `crumb_${crumb.link}`)}
-                      onDrop={(e) => {
-                        const targetPath = crumb.link.substring("/drive/folder".length);
-                        handleDrop(e, targetPath);
-                      }}
-                      className={cn(
-                        "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
-                        isDraggingActive && "pointer-events-none-children",
+                      <Link
+                        to={crumb.link}
+                        onClick={clearSelection}
+                        onDragOver={(e) => handleDragOverCard(e, `crumb_${crumb.link}`)}
+                        onDrop={(e) => {
+                          const targetPath = crumb.link.substring("/drive/folder".length);
+                          handleDrop(e, targetPath);
+                        }}
+                        data-drop-path={crumb.link.substring("/drive/folder".length) || "/"}
+                        className={cn(
+                          "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                          isDraggingActive && "pointer-events-none-children",
                         dragOverId === `crumb_${crumb.link}` && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
                       )}
                     >

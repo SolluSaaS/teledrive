@@ -6,18 +6,17 @@ import { restoreSession } from "./lib/telegram/restoreSession";
 import { bootstrapTeleDrive } from "./lib/telegram/bootstrap";
 import { Toaster } from "@/components/ui/sonner";
 import { invoke } from "@tauri-apps/api/core";
+import DriveBrowserPage from "./pages/DriveBrowserPage";
+import RecentPage from "./pages/RecentPage";
+import StarredPage from "./pages/StarredPage";
+import TrashPage from "./pages/TrashPage";
+import ArchivedPage from "./pages/ArchivedPage";
+import SearchPage from "./pages/SearchPage";
 
 // Lazy pages
 const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
-const MyDrivePage = lazy(() => import("./pages/MyDrivePage"));
-const RecentPage = lazy(() => import("./pages/RecentPage"));
-const StarredPage = lazy(() => import("./pages/StarredPage"));
-const TrashPage = lazy(() => import("./pages/TrashPage"));
-const ArchivedPage = lazy(() => import("./pages/ArchivedPage"));
-const FolderPage = lazy(() => import("./pages/FolderPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
-const SearchPage = lazy(() => import("./pages/SearchPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 // Full-screen spinner fallback
@@ -170,13 +169,13 @@ function App() {
             }
           >
             <Route index element={<Navigate to="my-drive" replace />} />
-            <Route path="my-drive" element={<MyDrivePage />} />
+            <Route path="my-drive" element={<DriveBrowserPage root />} />
             <Route path="recent" element={<RecentPage />} />
             <Route path="starred" element={<StarredPage />} />
             <Route path="trash" element={<TrashPage />} />
             <Route path="archived" element={<ArchivedPage />} />
             <Route path="search" element={<SearchPage />} />
-            <Route path="folder/*" element={<FolderPage />} />
+            <Route path="folder/*" element={<DriveBrowserPage />} />
           </Route>
 
           {/* Settings protected route */}

@@ -588,6 +588,42 @@ export function useFileActions() {
     });
   };
 
+  const starMultiple = async (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    return fileActionQueue.enqueue(async () => {
+      try {
+        const channelId = await getChannelId();
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
+
+          const folderPrefixes = targetFiles
+            .filter(isFolder)
+            .map(getFolderFullPath);
+
+          const updatedFiles = files.map((f) => {
+            const isInTarget = fileIdSet.has(f.id);
+            const isInTargetFolder = folderPrefixes.some(
+              (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
+            );
+            if ((isInTarget || isInTargetFolder) && !f.trashed && !f.archived) {
+              return { ...f, starred: true };
+            }
+            return f;
+          });
+
+          await saveIndex(channelId, updatedFiles);
+          setFiles(updatedFiles);
+        });
+        toast.success(`Starred ${fileIds.length} item(s)`);
+      } catch (err: any) {
+        console.error("Failed to star multiple:", err);
+        toast.error(err.message || "Failed to star items");
+      }
+    });
+  };
+
   const unarchiveMultiple = async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     return fileActionQueue.enqueue(async () => {
@@ -765,6 +801,7 @@ export function useFileActions() {
     moveMultipleToTrash,
     restoreMultipleFromTrash,
     deleteMultiplePermanently,
+    starMultiple,
     archiveMultiple,
     unarchiveMultiple,
     toggleOffline,
