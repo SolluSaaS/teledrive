@@ -95,16 +95,7 @@ export async function bootstrapTeleDrive(
     console.warn("[bootstrap] Orphan scan failed (non-fatal):", scanErr);
   }
 
-  // Always re-save the index on boot to:
-  // 1. Clean up any duplicate/stale pinned messages that accumulated from previous failures
-  // 2. Ensure the current file list is authoritative in Telegram
-  // saveIndex deletes ALL old index messages first, then writes exactly one clean set.
-  try {
-    onStatusChange?.("Cleaning up index...");
-    await saveIndex(channelId, files);
-  } catch (cleanupErr) {
-    console.warn("[bootstrap] Could not rewrite index during cleanup:", cleanupErr);
-  }
+
 
   onStatusChange?.("Initializing local storage view...");
   useFileStore.getState().setFiles(files);
