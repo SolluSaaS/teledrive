@@ -202,29 +202,21 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     console.warn("[metadataStore] Could not enumerate old index messages:", err);
   }
 
-  // Unpin and delete all old index messages
-  for (const msgId of oldIndexMsgIds) {
+  // Unpin and delete all old index messages in a single batch operation.
+  // Deleting the message automatically removes it from the pinned list.
+  if (oldIndexMsgIds.length > 0) {
     try {
       await withTimeout(
-        client.invoke(
-          new Api.messages.UpdatePinnedMessage({
-            peer,
-            id: msgId,
-            unpin: true,
-            silent: true,
-          })
-        ),
-        3000,
-        "UpdatePinnedMessage(unpin)"
+        client.deleteMessages(peer, oldIndexMsgIds, { revoke: true }),
+        5000,
+        "deleteMessages(batch)"
       );
-    } catch (_) { /* ignore */ }
-    try {
-      await withTimeout(
-        client.deleteMessages(peer, [msgId], { revoke: true }),
-        3000,
-        "deleteMessages"
+    } catch (err: any) {
+      console.warn(
+        `[metadataStore] Batch delete of old index messages failed (non-fatal):`,
+        err?.message || err
       );
-    } catch (_) { /* ignore */ }
+    }
   }
 
   // 2. Chunk files (≤15 files per chunk to stay under 4096 chars)
@@ -235,22 +227,22 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
   }
   if (chunks.length === 0) chunks.push([]);
 
-  // 3. Send fresh index messages and try to pin each
-  for (let i = 0; i < chunks.length; i++) {
+  // 3. Send fresh index messages and try to pin each in parallel
+  const sendPromises = chunks.map(async (chunk, i) => {
     const payload = {
       teledrive_index: true,
       version: 1,
       chunkIndex: i,
       totalChunks: chunks.length,
-      files: chunks[i],
+      files: chunk,
     };
     const text = JSON.stringify(payload);
 
     try {
       const result = await withTimeout(
         client.sendMessage(peer, { message: text }),
-        5000,
-        "sendMessage(chunk)"
+        8000,
+        `sendMessage(chunk ${i})`
       );
 
       // Pin best-effort
@@ -264,21 +256,22 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
               silent: true,
             })
           ),
-          3000,
-          "UpdatePinnedMessage(pin)"
+          4000,
+          `UpdatePinnedMessage(pin chunk ${i})`
         );
       } catch (pinErr: any) {
         console.warn(
           `[metadataStore] Could not pin index chunk ${i} (id=${result.id}):`,
           pinErr?.message || pinErr
         );
-        // Non-fatal: loadIndex will find it via full scan
       }
     } catch (sendErr) {
       console.error(`[metadataStore] Failed to send index chunk ${i}:`, sendErr);
       throw sendErr;
     }
-  }
+  });
+
+  await Promise.all(sendPromises);
 }
 
 // ---------------------------------------------------------------------------

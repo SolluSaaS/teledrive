@@ -9,6 +9,7 @@ interface FileState {
   selectedIdsSet: Set<string>;
   isLoading: boolean;
   uploadQueue: UploadItem[];
+  isOperating: boolean;
   setFiles: (files: TeleFile[]) => void;
   setFolder: (path: string) => void;
   toggleSelect: (id: string) => void;
@@ -19,6 +20,7 @@ interface FileState {
   removeFromQueue: (id: string) => void;
   clearQueue: () => void;
   setLoading: (loading: boolean) => void;
+  setIsOperating: (isOperating: boolean) => void;
 }
 
 export const useFileStore = create<FileState>((set) => ({
@@ -28,6 +30,7 @@ export const useFileStore = create<FileState>((set) => ({
   selectedIdsSet: new Set<string>(),
   isLoading: false,
   uploadQueue: [],
+  isOperating: false,
   setFiles: (files) => set({ files }),
   setFolder: (currentFolder) =>
     set({ currentFolder, selectedIds: [], selectedIdsSet: new Set() }),
@@ -58,4 +61,5 @@ export const useFileStore = create<FileState>((set) => ({
     })),
   clearQueue: () => set({ uploadQueue: [] }),
   setLoading: (isLoading) => set({ isLoading }),
+  setIsOperating: (isOperating) => set({ isOperating }),
 }));

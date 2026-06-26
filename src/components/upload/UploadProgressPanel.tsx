@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
 
 /**
  * Circular progress indicator for the minimized header state.
@@ -27,7 +26,7 @@ function CircularProgress({ value }: { value: number }) {
         cx="9"
         cy="9"
         r={radius}
-        className="stroke-slate-700 dark:stroke-slate-800"
+        className="stroke-slate-200 dark:stroke-slate-800"
         strokeWidth="2"
         fill="transparent"
       />
@@ -87,21 +86,21 @@ export function UploadProgressPanel() {
     >
       {/* Header */}
       <div 
-        className="flex items-center justify-between px-4 py-3 bg-slate-900 dark:bg-slate-950 text-white select-none cursor-pointer border-b dark:border-slate-800" 
+        className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white select-none cursor-pointer border-b border-slate-200/80 dark:border-slate-800" 
         onClick={() => setIsMinimized(!isMinimized)}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           {isAllFinished ? (
             errorCount > 0 ? (
-              <XCircle className="h-4.5 w-4.5 text-red-400 shrink-0" />
+              <XCircle className="h-4.5 w-4.5 text-red-500 dark:text-red-400 shrink-0" />
             ) : (
-              <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500 dark:text-emerald-450 shrink-0" />
             )
           ) : (
             isMinimized ? (
               <CircularProgress value={overallProgressPercent} />
             ) : (
-              <Loader2 className="h-4.5 w-4.5 text-brand-400 animate-spin shrink-0" />
+              <Loader2 className="h-4.5 w-4.5 text-brand-500 dark:text-brand-400 animate-spin shrink-0" />
             )
           )}
           <span className="text-xs font-bold font-sans truncate pr-2">
@@ -113,23 +112,21 @@ export function UploadProgressPanel() {
           </span>
         </div>
         
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="icon"
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
             onClick={() => setIsMinimized(!isMinimized)}
-            className="h-7 w-7 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+            className="h-7 w-7 flex items-center justify-center text-slate-450 hover:text-slate-700 dark:text-slate-500 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer border-0 bg-transparent outline-none"
           >
             {isMinimized ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+          </button>
+          <button
+            type="button"
             onClick={handleClose}
-            className="h-7 w-7 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+            className="h-7 w-7 flex items-center justify-center text-slate-450 hover:text-slate-700 dark:text-slate-500 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer border-0 bg-transparent outline-none"
           >
             <X className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
       </div>
 
