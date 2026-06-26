@@ -18,6 +18,19 @@ function toNumber(val: any): number {
 }
 
 /**
+ * Safely resolves a channel ID string to a peer entity for GramJS client queries.
+ */
+async function resolvePeer(channelId: string): Promise<any> {
+  const client = getClient();
+  try {
+    return await client.getInputEntity(channelId);
+  } catch (err) {
+    console.warn(`[downloader] getInputEntity failed for ${channelId}, trying getEntity:`, err);
+    return await client.getEntity(channelId);
+  }
+}
+
+/**
  * Downloads a file from the Telegram channel and saves it to disk using Tauri file dialog.
  */
 export async function downloadFileFromTelegram(
@@ -29,8 +42,8 @@ export async function downloadFileFromTelegram(
   const client = getClient();
   
   try {
-    // Get the message from the channel using the string channelId directly
-    const messages = await client.getMessages(channelId, {
+    const peer = await resolvePeer(channelId);
+    const messages = await client.getMessages(peer, {
       ids: [messageId],
     });
     
@@ -89,7 +102,8 @@ export async function downloadFileToBuffer(
   const client = getClient();
   
   try {
-    const messages = await client.getMessages(channelId, {
+    const peer = await resolvePeer(channelId);
+    const messages = await client.getMessages(peer, {
       ids: [messageId],
     });
     
