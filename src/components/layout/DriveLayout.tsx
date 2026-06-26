@@ -161,6 +161,10 @@ export default function DriveLayout() {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Show "move" cursor (no "+" badge on macOS) for internal TeleDrive drags.
+    // Show "copy" cursor ("+" badge) for OS file uploads — that's the correct UX.
+    const isInternalDrag = useFileStore.getState().draggedItemIds.length > 0;
+    e.dataTransfer.dropEffect = isInternalDrag ? "move" : "copy";
   };
 
   const handleDrop = (e: React.DragEvent) => {

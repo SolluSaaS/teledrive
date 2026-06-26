@@ -21,6 +21,7 @@ import {
   Archive,
   CheckCircle,
   Check,
+  Plus,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -130,6 +131,12 @@ function getFileType(file: TeleFile): string {
 }
 
 
+// ---------------------------------------------------------------------------
+// Module-level drag state — immune to React re-renders and stale closures.
+// These are set synchronously in handleDragStart and read in drop handlers.
+// ---------------------------------------------------------------------------
+let _dndActiveDragIds: string[] = [];
+
 interface FileBrowserProps {
   folderPath?: string;
   mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived";
@@ -182,6 +189,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   // Drag and Drop state
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Ref so drop handlers always see the current hover target (no stale closure)
+  const dragOverIdRef = useRef<string | null>(null);
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -333,21 +342,26 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const handleDragStart = (e: React.DragEvent, file: TeleFile) => {
     // Determine which IDs are being dragged (respect multi-selection)
-    const dragIds = selectedIdsSet.has(file.id) ? selectedIds : [file.id];
+    const dragIds = selectedIdsSet.has(file.id) ? [...selectedIds] : [file.id];
 
-    // Write IDs to global store — the drop handlers read from here
-    // This bypasses unreliable dataTransfer.getData() in Tauri WebKit on macOS
+    // ① Module-level var: most reliable, no React state lag
+    _dndActiveDragIds = dragIds;
+    // ② Zustand store: lets DriveLayout sidebar drop also work
     useFileStore.getState().setDraggedItemIds(dragIds);
-
-    // Also write to dataTransfer as a best-effort fallback for external drop targets
+    // ③ dataTransfer: best-effort for non-Tauri environments
     try { e.dataTransfer.setData("text/plain", JSON.stringify(dragIds)); } catch { /* ignore */ }
+
     e.dataTransfer.effectAllowed = "move";
     setDraggedId(file.id);
   };
 
   const handleDragEnd = () => {
+    // Clean up all drag state on drag cancel or end
+    _dndActiveDragIds = [];
+    dragOverIdRef.current = null;
     useFileStore.getState().clearDraggedItemIds();
     setDraggedId(null);
+    setDragOverId(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -357,35 +371,84 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const handleDragEnter = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
-    setDragOverId(targetId);
+    dragOverIdRef.current = targetId; // ref — always current, no stale closure
+    setDragOverId(targetId);           // state — for visual re-render
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    // Only clear drag-over state when actually leaving the zone (not entering a child element)
+    // Only clear when truly leaving (not entering a child element)
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    dragOverIdRef.current = null;
     setDragOverId(null);
   };
 
+  /**
+   * Primary drop handler on individual folder cards.
+   * Uses module-level _dndActiveDragIds for reliability in Tauri WebKit.
+   */
   const handleDrop = async (e: React.DragEvent, targetFolderPath: string) => {
     e.preventDefault();
-    e.stopPropagation(); // prevent DriveLayout root handler from also firing
+    e.stopPropagation(); // prevent bubbling to global handler below
+
+    const fileIds = [..._dndActiveDragIds];
+    _dndActiveDragIds = [];
+    dragOverIdRef.current = null;
+    useFileStore.getState().clearDraggedItemIds();
     setDragOverId(null);
     setDraggedId(null);
 
-    // Read IDs from the global store (reliable in Tauri WebKit unlike dataTransfer)
-    const fileIds = useFileStore.getState().draggedItemIds;
-    useFileStore.getState().clearDraggedItemIds();
-
-    if (!fileIds || fileIds.length === 0) return;
+    if (fileIds.length === 0) return;
 
     try {
       await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
       clearSelection();
     } catch (err) {
-      console.error("Failed to handle drop:", err);
+      console.error("[DnD] handleDrop failed:", err);
     }
   };
+
+  /**
+   * Global fallback drop handler — fires when onDrop on a specific folder card
+   * doesn't trigger (a known issue in Tauri WebKit).
+   * Uses dragOverIdRef.current to identify the hover target at the time of drop.
+   */
+  const handleGlobalDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const targetFolderId = dragOverIdRef.current;
+    const fileIds = [..._dndActiveDragIds];
+
+    // Reset all drag state
+    _dndActiveDragIds = [];
+    dragOverIdRef.current = null;
+    useFileStore.getState().clearDraggedItemIds();
+    setDragOverId(null);
+    setDraggedId(null);
+
+    if (fileIds.length === 0 || !targetFolderId) return;
+
+    // Resolve folder path by looking up the folder by ID
+    const allFiles = useFileStore.getState().files;
+    const targetFolder = allFiles.find((f) => f.id === targetFolderId);
+    if (!targetFolder) return;
+    const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
+    if (!isDir) return;
+
+    const folderPath =
+      targetFolder.folderPath === "/"
+        ? `/${targetFolder.name}`
+        : `${targetFolder.folderPath}/${targetFolder.name}`;
+
+    try {
+      await moveMultipleFilesOrFolders(fileIds, folderPath);
+      clearSelection();
+    } catch (err) {
+      console.error("[DnD] handleGlobalDrop failed:", err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveMultipleFilesOrFolders, clearSelection]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -764,7 +827,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         renderEmptyState()
       ) : viewMode === "grid" ? (
         /* GRID VIEW */
-        <div className="flex-1 overflow-y-auto min-h-0 select-none pb-20 pr-1 space-y-8">
+        <div
+          className="flex-1 overflow-y-auto min-h-0 select-none pb-20 pr-1 space-y-8"
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+          onDrop={handleGlobalDrop}
+        >
           {/* Folders Section */}
           {folders.length > 0 && (
             <div className="space-y-3">
@@ -818,6 +885,12 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           isBeingDragged && "opacity-40"
                         )}
                       >
+                        {/* Drop-target "+" badge — only visible while dragging over this folder */}
+                        {dragOverId === folder.id && draggedId !== null && (
+                          <span className="absolute top-1.5 right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 shadow pointer-events-none">
+                            <Plus className="h-3 w-3 text-white" />
+                          </span>
+                        )}
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
