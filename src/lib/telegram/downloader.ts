@@ -29,11 +29,8 @@ export async function downloadFileFromTelegram(
   const client = getClient();
   
   try {
-    // 1. Resolve the peer
-    const peer = await client.getEntity(channelId);
-
-    // 2. Get the message from the channel
-    const messages = await client.getMessages(peer, {
+    // Get the message from the channel using the string channelId directly
+    const messages = await client.getMessages(channelId, {
       ids: [messageId],
     });
     
@@ -42,7 +39,7 @@ export async function downloadFileFromTelegram(
       throw new Error("Target file message or media not found on Telegram.");
     }
     
-    // 3. Open Tauri save dialog to let user choose target path
+    // Open Tauri save dialog to let user choose target path
     const targetPath = await tauriSaveDialog({
       defaultPath: fileName,
     });
@@ -54,7 +51,7 @@ export async function downloadFileFromTelegram(
     
     toast.info(`Downloading "${fileName}"...`);
     
-    // 4. Download the media buffer from Telegram
+    // Download the media buffer from Telegram
     const buffer = (await client.downloadMedia(message.media, {
       progressCallback: (downloadedBytes: any, totalBytes: any) => {
         const downloaded = toNumber(downloadedBytes);
@@ -70,7 +67,7 @@ export async function downloadFileFromTelegram(
       throw new Error("Failed to download media buffer from Telegram.");
     }
     
-    // 5. Save the file to disk
+    // Save the file to disk
     await writeFile(targetPath, buffer);
     toast.success(`"${fileName}" downloaded successfully!`);
   } catch (error: any) {
@@ -92,11 +89,7 @@ export async function downloadFileToBuffer(
   const client = getClient();
   
   try {
-    // 1. Resolve the peer
-    const peer = await client.getEntity(channelId);
-
-    // 2. Get the message from the channel
-    const messages = await client.getMessages(peer, {
+    const messages = await client.getMessages(channelId, {
       ids: [messageId],
     });
     

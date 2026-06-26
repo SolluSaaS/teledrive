@@ -3,6 +3,7 @@ import { ensureStorageChannel } from "./channelManager";
 import { loadIndex, saveIndex } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
 import { TeleFile } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * Bootstraps TeleDrive storage channel and loads the metadata.
@@ -31,11 +32,15 @@ export async function bootstrapTeleDrive(
   // -----------------------------------------------------------------------
   onStatusChange?.("Scanning for orphaned files...");
   try {
+    await invoke("log_vault_state", { state: `BOOTSTRAP: Starting orphan scan for channelId=${channelId}` }).catch(() => {});
     const peer = await client.getEntity(channelId);
+    await invoke("log_vault_state", { state: `BOOTSTRAP: Resolving recent messages...` }).catch(() => {});
     const recentMessages = await client.getMessages(peer, { limit: 200 });
+    await invoke("log_vault_state", { state: `BOOTSTRAP: Fetched recent messages count=${recentMessages.length}` }).catch(() => {});
 
     // Build a Set of already-indexed message IDs (normalised to number)
     const indexedMsgIds = new Set(files.map((f) => Number(f.messageId)));
+    await invoke("log_vault_state", { state: `BOOTSTRAP: Indexed message IDs: ${Array.from(indexedMsgIds).join(", ")}` }).catch(() => {});
 
     const orphans: TeleFile[] = [];
 
@@ -63,6 +68,8 @@ export async function bootstrapTeleDrive(
       );
       if (filenameAttr?.fileName) name = filenameAttr.fileName;
 
+      await invoke("log_vault_state", { state: `BOOTSTRAP: Found orphan file: name=${name} size=${size} msgId=${msgId}` }).catch(() => {});
+
       orphans.push({
         id: `recovered_${msgId}`,
         name,
@@ -83,6 +90,8 @@ export async function bootstrapTeleDrive(
       const existingMsgIds = new Set(files.map((f) => Number(f.messageId)));
       const newOrphans = orphans.filter((o) => !existingMsgIds.has(Number(o.messageId)));
 
+      await invoke("log_vault_state", { state: `BOOTSTRAP: Total new orphans to recover: ${newOrphans.length}` }).catch(() => {});
+
       if (newOrphans.length > 0) {
         console.log(`[bootstrap] Recovering ${newOrphans.length} orphaned file(s)…`);
         files = [...files, ...newOrphans];
@@ -90,8 +99,9 @@ export async function bootstrapTeleDrive(
         await saveIndex(channelId, files);
       }
     }
-  } catch (scanErr) {
+  } catch (scanErr: any) {
     // Non-fatal — if scan fails, still show whatever was in the index
+    await invoke("log_vault_state", { state: `BOOTSTRAP_SCAN_ERR: ${scanErr?.message || JSON.stringify(scanErr)}` }).catch(() => {});
     console.warn("[bootstrap] Orphan scan failed (non-fatal):", scanErr);
   }
 
