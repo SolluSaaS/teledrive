@@ -939,7 +939,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             <Plus className="h-3 w-3 text-white" />
                           </span>
                         )}
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="flex items-center gap-3 min-w-0 flex-1 pointer-events-none">
                           <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                             {folder.name}
@@ -1010,7 +1010,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         )}
                       >
                         {/* Upper icon/preview box */}
-                        <div className="flex-1 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center p-4 relative border-b border-slate-100 dark:border-slate-800/40">
+                        <div className="flex-1 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center p-4 relative border-b border-slate-100 dark:border-slate-800/40 pointer-events-none">
                           <FileIcon name={file.name} mime={file.mime} size="lg" />
                           {file.starred && (
                             <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
@@ -1022,7 +1022,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
                         {/* Lower text & action menu info */}
                         <div className="p-3 pr-2 relative bg-white dark:bg-slate-900 flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-0 flex-1 pointer-events-none">
                             <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                               {file.name}
                             </p>
@@ -1134,7 +1134,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         />
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 pointer-events-none">
                           <FileIcon name={file.name} mime={file.mime} size="sm" className="shrink-0" />
                           <span className="truncate max-w-[200px] sm:max-w-xs">{file.name}</span>
                           {file.starred && (
@@ -1145,13 +1145,13 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 hidden sm:table-cell text-xs text-slate-550 dark:text-slate-400">
+                      <td className="py-3 px-4 hidden sm:table-cell text-xs text-slate-550 dark:text-slate-400 pointer-events-none">
                         {getFileType(file)}
                       </td>
-                      <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400">
+                      <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400 pointer-events-none">
                         {isDir ? "—" : formatFileSize(file.size)}
                       </td>
-                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400">
+                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400 pointer-events-none">
                         {new Date(file.uploadedAt).toLocaleDateString()}
                       </td>
                       <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
