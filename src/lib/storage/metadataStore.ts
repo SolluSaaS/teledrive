@@ -1,6 +1,7 @@
 import { Api } from "telegram";
 import { getClient } from "../telegram/client";
 import { TeleFile } from "../types";
+import { useFileStore } from "../../stores/fileStore";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -202,7 +203,7 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
 
 /** Adds a file entry to the index (replaces if same id already exists). */
 export async function addFile(channelId: string, file: TeleFile): Promise<TeleFile[]> {
-  const files = await loadIndex(channelId);
+  const files = useFileStore.getState().files;
   // Replace existing entry with same id, or append
   const updatedFiles = [...files.filter((f) => f.id !== file.id), file];
   await saveIndex(channelId, updatedFiles);
@@ -211,7 +212,7 @@ export async function addFile(channelId: string, file: TeleFile): Promise<TeleFi
 
 /** Removes a file entry from the index by id. */
 export async function removeFile(channelId: string, fileId: string): Promise<TeleFile[]> {
-  const files = await loadIndex(channelId);
+  const files = useFileStore.getState().files;
   const file = files.find((f) => f.id === fileId);
   const updatedFiles = files.filter((f) => f.id !== fileId);
   await saveIndex(channelId, updatedFiles);
@@ -259,7 +260,7 @@ export async function updateFile(
   fileId: string,
   patch: Partial<TeleFile>
 ): Promise<TeleFile[]> {
-  const files = await loadIndex(channelId);
+  const files = useFileStore.getState().files;
   const updatedFiles = files.map((f) =>
     f.id === fileId ? { ...f, ...patch } : f
   );

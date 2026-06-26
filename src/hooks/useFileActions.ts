@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
 import { addFile, removeFile, updateFile, deleteTelegramMessage } from "../lib/storage/metadataStore";
-import { loadIndex, saveIndex } from "../lib/storage/metadataStore";
+import { saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
@@ -186,7 +186,7 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const allFiles = await loadIndex(channelId);
+      const allFiles = useFileStore.getState().files;
 
       const trashed = allFiles.filter((f) => f.trashed);
       const active = allFiles.filter((f) => !f.trashed);
