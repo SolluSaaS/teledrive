@@ -193,10 +193,12 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   // Video fullscreen handler
   const handleVideoFullscreen = useCallback(() => {
     const container = videoContainerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
+    if (!container || !video) return;
 
     const doc = document as any;
-    const elem = container as any;
+    const cElem = container as any;
+    const vElem = video as any;
 
     const isFS = !!(
       doc.fullscreenElement ||
@@ -205,31 +207,65 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       doc.msFullscreenElement
     );
 
+    const requestFSOnVideo = () => {
+      try {
+        if (vElem.requestFullscreen) {
+          vElem.requestFullscreen().catch((err: any) => {
+            console.error("video.requestFullscreen failed:", err);
+          });
+        } else if (vElem.webkitRequestFullscreen) {
+          vElem.webkitRequestFullscreen();
+        } else if (vElem.webkitRequestFullScreen) {
+          vElem.webkitRequestFullScreen();
+        } else if (vElem.webkitEnterFullscreen) {
+          try {
+            vElem.webkitEnterFullscreen();
+          } catch (e) {
+            console.error("webkitEnterFullscreen threw:", e);
+          }
+        }
+      } catch (err) {
+        console.error("All video fullscreen methods failed:", err);
+      }
+    };
+
     if (!isFS) {
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch(console.error);
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen();
-      } else if (elem.webkitRequestFullScreen) {
-        elem.webkitRequestFullScreen();
-      } else if (elem.mozRequestFullScreen) {
-        elem.mozRequestFullScreen();
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen();
-      } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-        (videoRef.current as any).webkitEnterFullscreen();
+      try {
+        if (cElem.requestFullscreen) {
+          cElem.requestFullscreen().catch((err: any) => {
+            console.warn("Container fullscreen rejected, trying video directly:", err);
+            requestFSOnVideo();
+          });
+        } else if (cElem.webkitRequestFullscreen) {
+          cElem.webkitRequestFullscreen();
+        } else if (cElem.webkitRequestFullScreen) {
+          cElem.webkitRequestFullScreen();
+        } else if (cElem.mozRequestFullScreen) {
+          cElem.mozRequestFullScreen();
+        } else if (cElem.msRequestFullscreen) {
+          cElem.msRequestFullscreen();
+        } else {
+          requestFSOnVideo();
+        }
+      } catch (err) {
+        console.warn("Container fullscreen threw error, trying video directly:", err);
+        requestFSOnVideo();
       }
     } else {
-      if (doc.exitFullscreen) {
-        doc.exitFullscreen().catch(console.error);
-      } else if (doc.webkitExitFullscreen) {
-        doc.webkitExitFullscreen();
-      } else if (doc.webkitCancelFullScreen) {
-        doc.webkitCancelFullScreen();
-      } else if (doc.mozCancelFullScreen) {
-        doc.mozCancelFullScreen();
-      } else if (doc.msExitFullscreen) {
-        doc.msExitFullscreen();
+      try {
+        if (doc.exitFullscreen) {
+          doc.exitFullscreen().catch(console.error);
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.webkitCancelFullScreen) {
+          doc.webkitCancelFullScreen();
+        } else if (doc.mozCancelFullScreen) {
+          doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          doc.msExitFullscreen();
+        }
+      } catch (err) {
+        console.error("Failed to exit fullscreen:", err);
       }
     }
   }, []);
