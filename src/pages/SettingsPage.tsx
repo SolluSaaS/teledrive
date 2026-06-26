@@ -108,7 +108,10 @@ export default function SettingsPage() {
 
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
+    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground relative">
+      {/* Decorative ambient background blobs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/5 dark:bg-brand-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[8000ms]" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/5 dark:bg-indigo-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[12000ms]" />
       {/* Topbar Settings Header */}
       <header className="flex items-center gap-4 border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
         <Button
@@ -132,7 +135,7 @@ export default function SettingsPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop Split View: Nav List */}
         {(!isMobile || !mobileShowContent) && (
-          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/20 dark:bg-slate-900/5 shrink-0 overflow-y-auto border-slate-250 dark:border-slate-800/80 flex flex-col">
+          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/10 dark:bg-slate-950/10 backdrop-blur-md shrink-0 overflow-y-auto border-slate-200/60 dark:border-slate-800/80 flex flex-col z-10">
             <div className="flex-1 p-3 space-y-1.5">
               {sections.map((sec) => {
                 const Icon = sec.icon;
@@ -184,7 +187,7 @@ export default function SettingsPage() {
 
         {/* Settings Panel Content Area */}
         {(!isMobile || mobileShowContent) && (
-          <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background/50 backdrop-blur-md">
+          <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background/40 dark:bg-slate-950/30 backdrop-blur-md z-10">
             <div key={activeSection} className="max-w-2xl animate-slide-up-fade">
               <ActiveComponent />
             </div>

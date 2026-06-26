@@ -160,6 +160,25 @@
   animation: slideUpFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+@keyframes folderDropBadge {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.72);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+.animate-folder-drop-badge {
+  animation: folderDropBadge 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* Custom Drag and Drop helper: disable pointer events on children during drags to avoid relatedTarget null bugs in WebKit/Tauri */
 .dragging-active [data-folder-id] *,
 .dragging-active .pointer-events-none-children * {

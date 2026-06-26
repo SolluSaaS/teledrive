@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Grid,
@@ -22,6 +23,7 @@ import {
   CheckCircle,
   Check,
   Plus,
+  MoreHorizontal,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -49,7 +51,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { fuzzySearch } from "@/lib/search/searchEngine";
-import { getFileCategory } from "@/lib/files/fileUtils";
+import { getFileCategory, getFileIconType } from "@/lib/files/fileUtils";
 import { isEditableFile } from "@/lib/files/editableTypes";
 
 // ---------------------------------------------------------------------------
@@ -133,14 +135,40 @@ function getFileType(file: TeleFile): string {
 
 // ---------------------------------------------------------------------------
 // Module-level drag state — immune to React re-renders and stale closures.
-// These are set synchronously in handleDragStart and read in drop handlers.
 // ---------------------------------------------------------------------------
 let _dndActiveDragIds: string[] = [];
+const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
+
+const fileHoverStyles: Record<string, string> = {
+  image: "hover:border-rose-300/80 dark:hover:border-rose-800/60 hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.35)]",
+  video: "hover:border-purple-300/80 dark:hover:border-purple-800/60 hover:shadow-[0_10px_20px_-10px_rgba(168,85,247,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(168,85,247,0.35)]",
+  audio: "hover:border-amber-300/80 dark:hover:border-amber-800/60 hover:shadow-[0_10px_20px_-10px_rgba(245,158,11,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(245,158,11,0.35)]",
+  pdf: "hover:border-red-300/80 dark:hover:border-red-800/60 hover:shadow-[0_10px_20px_-10px_rgba(239,68,68,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(239,68,68,0.35)]",
+  spreadsheet: "hover:border-emerald-300/80 dark:hover:border-emerald-800/60 hover:shadow-[0_10px_20px_-10px_rgba(16,185,129,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(16,185,129,0.35)]",
+  document: "hover:border-blue-300/80 dark:hover:border-blue-800/60 hover:shadow-[0_10px_20px_-10px_rgba(59,130,246,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(59,130,246,0.35)]",
+  presentation: "hover:border-orange-300/80 dark:hover:border-orange-800/60 hover:shadow-[0_10px_20px_-10px_rgba(249,115,22,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(249,115,22,0.35)]",
+  code: "hover:border-indigo-300/80 dark:hover:border-indigo-800/60 hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.35)]",
+  archive: "hover:border-yellow-300/80 dark:hover:border-yellow-800/60 hover:shadow-[0_10px_20px_-10px_rgba(234,179,8,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(234,179,8,0.35)]",
+  file: "hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-[0_10px_20px_-10px_rgba(148,163,184,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(148,163,184,0.35)]",
+};
 
 interface FileBrowserProps {
   folderPath?: string;
   mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived";
   searchQuery?: string;
+}
+
+interface InternalDragState {
+  ids: string[];
+  sourceId: string;
+  previewFile: TeleFile;
+  previewVariant: "folder-grid" | "file-grid" | "list-row";
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
 }
 
 export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = "" }: FileBrowserProps) {
@@ -189,13 +217,226 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   // Drag and Drop state
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [internalDrag, setInternalDrag] = useState<InternalDragState | null>(null);
   // Ref so drop handlers always see the current hover target (no stale closure)
   const dragOverIdRef = useRef<string | null>(null);
   const hasDroppedRef = useRef(false);
-  const dragStartTimeoutRef = useRef<any>(null);
+  const dragCandidateRef = useRef<{
+    file: TeleFile;
+    previewVariant: "folder-grid" | "file-grid" | "list-row";
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
 
   const draggedItemIds = useFileStore((state) => state.draggedItemIds);
   const isDraggingActive = draggedId !== null || draggedItemIds.length > 0;
+
+  const resetDragState = useCallback(() => {
+    _dndActiveDragIds = [];
+    dragOverIdRef.current = null;
+    hasDroppedRef.current = false;
+    dragCandidateRef.current = null;
+    useFileStore.getState().clearDraggedItemIds();
+    setDragOverId(null);
+    setDraggedId(null);
+    setInternalDrag(null);
+  }, []);
+
+  const resolveDraggedIds = useCallback((e?: React.DragEvent): string[] => {
+    if (_dndActiveDragIds.length > 0) {
+      return [..._dndActiveDragIds];
+    }
+
+    const rawPayloads: string[] = [];
+    if (e) {
+      try {
+        rawPayloads.push(e.dataTransfer.getData(DND_PAYLOAD_MIME));
+      } catch {
+        // ignore
+      }
+      try {
+        rawPayloads.push(e.dataTransfer.getData("text/plain"));
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const raw of rawPayloads) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((id) => typeof id === "string")) {
+          return parsed;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const fallbackIds = useFileStore.getState().draggedItemIds;
+    return Array.isArray(fallbackIds) ? [...fallbackIds] : [];
+  }, []);
+
+  const resolveTargetFolderPath = useCallback((targetFolderId: string): string | null => {
+    if (!targetFolderId) return null;
+    if (targetFolderId.startsWith("/")) return targetFolderId;
+
+    const allFiles = useFileStore.getState().files;
+    const targetFolder = allFiles.find((f) => f.id === targetFolderId);
+    if (!targetFolder) return null;
+
+    const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
+    if (!isDir) return null;
+
+    return targetFolder.folderPath === "/"
+      ? `/${targetFolder.name}`
+      : `${targetFolder.folderPath}/${targetFolder.name}`;
+  }, []);
+
+  const resolveFolderIdFromEvent = useCallback((e: React.DragEvent): string | null => {
+    const target = e.target;
+    if (!(target instanceof Element)) return null;
+    const folderElement = target.closest("[data-folder-id]");
+    return folderElement?.getAttribute("data-folder-id") ?? null;
+  }, []);
+
+  const resolveFolderIdFromPoint = useCallback((x: number, y: number): string | null => {
+    const element = document.elementFromPoint(x, y);
+    if (!(element instanceof Element)) return null;
+    const folderElement = element.closest("[data-folder-id]");
+    return folderElement?.getAttribute("data-folder-id") ?? null;
+  }, []);
+
+  const moveDraggedItems = useCallback(async (fileIds: string[], targetFolderId: string | null) => {
+    if (fileIds.length === 0 || !targetFolderId) return;
+    const targetFolderPath = resolveTargetFolderPath(targetFolderId);
+    if (!targetFolderPath) return;
+
+    try {
+      await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
+      clearSelection();
+    } catch (err) {
+      console.error("[DnD] moveDraggedItems failed:", err);
+    }
+  }, [clearSelection, moveMultipleFilesOrFolders, resolveTargetFolderPath]);
+
+  const startInternalDrag = useCallback((
+    file: TeleFile,
+    previewVariant: "folder-grid" | "file-grid" | "list-row",
+    clientX: number,
+    clientY: number,
+    offsetX: number,
+    offsetY: number,
+    width: number,
+    height: number,
+  ) => {
+    const dragIds = selectedIdsSet.has(file.id) ? [...selectedIds] : [file.id];
+    _dndActiveDragIds = dragIds;
+    useFileStore.getState().setDraggedItemIds(dragIds);
+    setDraggedId(file.id);
+    setInternalDrag({
+      ids: dragIds,
+      sourceId: file.id,
+      previewFile: file,
+      previewVariant,
+      x: clientX,
+      y: clientY,
+      offsetX,
+      offsetY,
+      width,
+      height,
+    });
+  }, [selectedIds, selectedIdsSet]);
+
+  const handlePointerDown = useCallback((
+    e: React.MouseEvent,
+    file: TeleFile,
+    previewVariant: "folder-grid" | "file-grid" | "list-row",
+  ) => {
+    if (isMobile || e.button !== 0) return;
+    const target = e.target;
+    if (target instanceof Element && target.closest("[data-no-drag]")) return;
+
+    const currentTarget = e.currentTarget;
+    if (!(currentTarget instanceof Element)) return;
+    const rect = currentTarget.getBoundingClientRect();
+
+    dragCandidateRef.current = {
+      file,
+      previewVariant,
+      startX: e.clientX,
+      startY: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    suppressClickRef.current = false;
+  }, [isMobile]);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const candidate = dragCandidateRef.current;
+      if (candidate && !internalDrag) {
+        const dx = e.clientX - candidate.startX;
+        const dy = e.clientY - candidate.startY;
+        if (Math.hypot(dx, dy) < 6) return;
+
+        suppressClickRef.current = true;
+        startInternalDrag(
+          candidate.file,
+          candidate.previewVariant,
+          e.clientX,
+          e.clientY,
+          candidate.offsetX,
+          candidate.offsetY,
+          candidate.width,
+          candidate.height,
+        );
+      }
+
+      if (!internalDrag && !candidate) return;
+
+      const activeDrag = internalDrag ?? (candidate ? {
+        ids: selectedIdsSet.has(candidate.file.id) ? [...selectedIds] : [candidate.file.id],
+        sourceId: candidate.file.id,
+      } : null);
+
+      if (!activeDrag || !internalDrag) return;
+
+      const folderId = resolveFolderIdFromPoint(e.clientX, e.clientY);
+      const validHoverId = folderId && !activeDrag.ids.includes(folderId) ? folderId : null;
+      dragOverIdRef.current = validHoverId;
+      setDragOverId(validHoverId);
+      setInternalDrag((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : prev);
+    };
+
+    const handleWindowMouseUp = () => {
+      dragCandidateRef.current = null;
+      if (!internalDrag) return;
+
+      const draggedIds = [...internalDrag.ids];
+      const targetFolderId = dragOverIdRef.current;
+      resetDragState();
+      void moveDraggedItems(draggedIds, targetFolderId);
+
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+    };
+  }, [internalDrag, moveDraggedItems, resetDragState, resolveFolderIdFromPoint, selectedIds, selectedIdsSet, startInternalDrag]);
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -329,6 +570,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   }, []);
 
   const handleItemClick = useCallback((e: React.MouseEvent, file: TeleFile) => {
+    if (suppressClickRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.shiftKey) {
       e.preventDefault();
     }
@@ -336,6 +582,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   }, [toggleSelect]);
 
   const handleItemDoubleClick = useCallback((file: TeleFile) => {
+    if (suppressClickRef.current) return;
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
     if (isDir) {
       clearSelection();
@@ -344,56 +591,6 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       toastPreview(file);
     }
   }, [clearSelection, navigate, toastPreview]);
-
-  const handleDragStart = (e: React.DragEvent, file: TeleFile) => {
-    hasDroppedRef.current = false;
-
-    // Clear any existing drag start timeout
-    if (dragStartTimeoutRef.current) {
-      clearTimeout(dragStartTimeoutRef.current);
-      dragStartTimeoutRef.current = null;
-    }
-
-    // Determine which IDs are being dragged (respect multi-selection)
-    const dragIds = selectedIdsSet.has(file.id) ? [...selectedIds] : [file.id];
-
-    // ① Module-level var: set synchronously so it's instantly available
-    _dndActiveDragIds = dragIds;
-
-    // ② Set dataTransfer synchronously (this MUST happen during the dragstart event)
-    try {
-      e.dataTransfer.setData("text/plain", JSON.stringify(dragIds));
-      e.dataTransfer.effectAllowed = "move";
-    } catch { /* ignore */ }
-
-    // ③ Defer React and Zustand state updates to the next tick to prevent WebKit/Tauri
-    // from instantly aborting the drag operation when the DOM changes.
-    dragStartTimeoutRef.current = setTimeout(() => {
-      useFileStore.getState().setDraggedItemIds(dragIds);
-      setDraggedId(file.id);
-      dragStartTimeoutRef.current = null;
-    }, 50);
-  };
-
-  const handleDragEnd = () => {
-    // Clear the drag start timeout if drag ended before it even fired
-    if (dragStartTimeoutRef.current) {
-      clearTimeout(dragStartTimeoutRef.current);
-      dragStartTimeoutRef.current = null;
-    }
-
-    // Delay state cleanup to let the drop event run first.
-    // If it was dropped, the drop handler will have set hasDroppedRef.current to true.
-    setTimeout(() => {
-      if (!hasDroppedRef.current) {
-        _dndActiveDragIds = [];
-        dragOverIdRef.current = null;
-        useFileStore.getState().clearDraggedItemIds();
-        setDraggedId(null);
-        setDragOverId(null);
-      }
-    }, 200); // 200ms is a safe window
-  };
 
   const handleDragOverCard = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
@@ -409,44 +606,12 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     e.stopPropagation();
 
     hasDroppedRef.current = true; // prevent handleDragEnd from clearing state prematurely
-
-    // Prefer the global array, but fallback to the event dataTransfer or Zustand store
-    let fileIds = [..._dndActiveDragIds];
-    if (fileIds.length === 0) {
-      try {
-        const raw = e.dataTransfer.getData("text/plain");
-        if (raw) {
-          fileIds = JSON.parse(raw);
-        }
-      } catch {
-        fileIds = useFileStore.getState().draggedItemIds || [];
-      }
-    }
-
-    // Reset all drag state immediately
-    _dndActiveDragIds = [];
-    dragOverIdRef.current = null;
-    useFileStore.getState().clearDraggedItemIds();
-    setDragOverId(null);
-    setDraggedId(null);
+    const fileIds = resolveDraggedIds(e);
+    resetDragState();
 
     if (fileIds.length === 0 || !targetFolderId) return;
-
-    let targetFolderPath = "";
-    if (targetFolderId.startsWith("/")) {
-      targetFolderPath = targetFolderId;
-    } else {
-      const allFiles = useFileStore.getState().files;
-      const targetFolder = allFiles.find((f) => f.id === targetFolderId);
-      if (!targetFolder) return;
-      const isDir = targetFolder.mime === "inode/directory" || targetFolder.mime === "application/x-directory";
-      if (!isDir) return;
-
-      targetFolderPath =
-        targetFolder.folderPath === "/"
-          ? `/${targetFolder.name}`
-          : `${targetFolder.folderPath}/${targetFolder.name}`;
-    }
+    const targetFolderPath = resolveTargetFolderPath(targetFolderId);
+    if (!targetFolderPath) return;
 
     try {
       await moveMultipleFilesOrFolders(fileIds, targetFolderPath);
@@ -464,13 +629,23 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
 
-    if (e.target === e.currentTarget) {
-      if (dragOverIdRef.current !== null) {
-        dragOverIdRef.current = null;
-        setDragOverId(null);
+    const internalDragIds = resolveDraggedIds(e);
+    if (internalDragIds.length === 0) return;
+
+    const targetFolderId = resolveFolderIdFromEvent(e);
+    if (targetFolderId) {
+      if (dragOverIdRef.current !== targetFolderId) {
+        dragOverIdRef.current = targetFolderId;
+        setDragOverId(targetFolderId);
       }
+      return;
     }
-  }, []);
+
+    if (dragOverIdRef.current !== null) {
+      dragOverIdRef.current = null;
+      setDragOverId(null);
+    }
+  }, [resolveDraggedIds, resolveFolderIdFromEvent]);
 
   /**
    * Global drop handler on the scrollable container.
@@ -482,18 +657,13 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
     hasDroppedRef.current = true;
 
-    // Resolve target path (if dropping into empty space of current folder, path is folderPath)
-    const targetFolderPath = folderPath;
-    const fileIds = [..._dndActiveDragIds].length > 0 
-      ? [..._dndActiveDragIds] 
-      : useFileStore.getState().draggedItemIds || [];
+    const fileIds = resolveDraggedIds(e);
+    const folderTargetId = resolveFolderIdFromEvent(e);
+    const targetFolderPath = folderTargetId
+      ? resolveTargetFolderPath(folderTargetId)
+      : folderPath;
 
-    // Reset all drag state
-    _dndActiveDragIds = [];
-    dragOverIdRef.current = null;
-    useFileStore.getState().clearDraggedItemIds();
-    setDragOverId(null);
-    setDraggedId(null);
+    resetDragState();
 
     if (fileIds.length === 0 || !targetFolderPath) return;
 
@@ -504,7 +674,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       console.error("[DnD] handleGlobalDrop failed:", err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveMultipleFilesOrFolders, clearSelection, folderPath]);
+  }, [moveMultipleFilesOrFolders, clearSelection, folderPath, resolveDraggedIds, resolveFolderIdFromEvent, resolveTargetFolderPath, resetDragState]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -892,7 +1062,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
                 Folders
               </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 px-1 py-1 overflow-visible">
                 {folders.map((folder, index) => {
                   const isSelected = selectedIdsSet.has(folder.id);
                   const isBeingDragged = draggedId !== null && (draggedId === folder.id || (isSelected && selectedIdsSet.has(draggedId)));
@@ -913,39 +1083,35 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       <div
                         onClick={(e) => handleItemClick(e, folder)}
                         onDoubleClick={() => handleItemDoubleClick(folder)}
+                        onMouseDown={(e) => handlePointerDown(e, folder, "folder-grid")}
                         onTouchStart={() => handleTouchStartItem(folder)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
-                        draggable={true}
-                        onDragStart={(e) => handleDragStart(e, folder)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOverCard(e, folder.id)}
-                        onDrop={(e) => handleDrop(e, folder.id)}
                         data-folder-id={folder.id}
                         style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex items-center justify-between p-3.5 pr-2.5 rounded-xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 hover:shadow-xs select-none animate-slide-up-fade",
+                          "group relative flex items-center justify-between gap-3 p-3.5 pr-3.5 rounded-xl border transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 select-none animate-slide-up-fade overflow-visible backdrop-blur-md",
                           isSelected
-                            ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
+                            ? "border-brand-400 bg-brand-50/45 dark:border-brand-500/80 dark:bg-brand-950/18 shadow-[0_0_0_1px_rgba(76,141,246,0.35),0_10px_24px_-18px_rgba(26,115,232,0.55)]"
                             : dragOverId === folder.id
-                            ? "border-brand-500 bg-brand-50/50 dark:border-brand-400 dark:bg-brand-950/20 ring-2 ring-brand-500/20 scale-[1.02] shadow-sm"
-                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50/30 dark:hover:bg-slate-900/40",
+                            ? "border-brand-500 bg-brand-50/60 dark:border-brand-400 dark:bg-brand-950/24 shadow-[0_0_0_2px_rgba(26,115,232,0.16),0_14px_28px_-18px_rgba(26,115,232,0.65)] -translate-y-0.5"
+                            : "border-slate-200/60 dark:border-slate-800/50 bg-white/60 dark:bg-slate-900/20 hover:border-brand-300 dark:hover:border-brand-800/80 hover:bg-white/80 dark:hover:bg-slate-900/40 hover:shadow-[0_10px_20px_-10px_rgba(26,115,232,0.18)]",
                           isBeingDragged && "opacity-40"
                         )}
                       >
                         {/* Drop-target "+" badge — only visible while dragging over this folder */}
                         {dragOverId === folder.id && isDraggingActive && (
-                          <span className="absolute top-1.5 right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 shadow pointer-events-none">
-                            <Plus className="h-3 w-3 text-white" />
+                          <span className="absolute -right-2.5 -top-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 shadow-[0_10px_22px_-12px_rgba(26,115,232,0.85)] ring-4 ring-white dark:ring-slate-900 pointer-events-none animate-folder-drop-badge">
+                            <Plus className="h-3.5 w-3.5 text-white" />
                           </span>
                         )}
                         <div className="flex items-center gap-3 min-w-0 flex-1 pointer-events-none">
-                          <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
+                          <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5] transition-transform duration-300 ease-out group-hover:scale-110" />
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                             {folder.name}
                           </span>
                         </div>
-                        <div className="shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="shrink-0 ml-auto" data-no-drag onClick={(e) => e.stopPropagation()}>
                           <FileActionsMenu
                             file={folder}
                             onPreview={toastPreview}
@@ -976,6 +1142,8 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {regularFiles.map((file, index) => {
                   const isSelected = selectedIdsSet.has(file.id);
+                  const iconType = getFileIconType(file.name, file.mime);
+                  const hoverClass = fileHoverStyles[iconType] || fileHoverStyles.file;
                   return (
                     <FileContextMenu
                       key={file.id}
@@ -994,23 +1162,24 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       <div
                         onClick={(e) => handleItemClick(e, file)}
                         onDoubleClick={() => handleItemDoubleClick(file)}
+                        onMouseDown={(e) => handlePointerDown(e, file, "file-grid")}
                         onTouchStart={() => handleTouchStartItem(file)}
                         onTouchEnd={handleTouchEndItem}
                         onTouchMove={handleTouchEndItem}
-                        draggable={true}
-                        onDragStart={(e) => handleDragStart(e, file)}
-                        onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(folders.length + index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex flex-col rounded-2xl border bg-white dark:bg-slate-900 transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 hover:shadow-md select-none h-44 animate-slide-up-fade",
+                          "group relative flex flex-col rounded-2xl border transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 select-none h-44 animate-slide-up-fade backdrop-blur-md",
                           isSelected
-                            ? "border-brand-500 bg-brand-50/40 dark:border-brand-500 dark:bg-brand-950/20 ring-2 ring-brand-500/30"
-                            : "border-slate-200/80 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700",
+                            ? "border-brand-500 bg-brand-50/45 dark:border-brand-500/80 dark:bg-brand-950/20 shadow-[0_0_0_1px_rgba(76,141,246,0.35),0_10px_24px_-18px_rgba(26,115,232,0.55)]"
+                            : cn(
+                                "border-slate-200/60 dark:border-slate-800/50 bg-white/60 dark:bg-slate-900/20 hover:bg-white/80 dark:hover:bg-slate-900/40",
+                                hoverClass
+                              ),
                           (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                         )}
                       >
                         {/* Upper icon/preview box */}
-                        <div className="flex-1 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center p-4 relative border-b border-slate-100 dark:border-slate-800/40 pointer-events-none">
+                        <div className="flex-1 bg-slate-50/20 dark:bg-slate-950/20 flex items-center justify-center p-4 relative border-b border-slate-100/60 dark:border-slate-800/30 pointer-events-none">
                           <FileIcon name={file.name} mime={file.mime} size="lg" />
                           {file.starred && (
                             <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
@@ -1021,7 +1190,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         </div>
 
                         {/* Lower text & action menu info */}
-                        <div className="p-3 pr-2 relative bg-white dark:bg-slate-900 flex items-center justify-between gap-2">
+                        <div className="p-3 pr-2 relative bg-white/40 dark:bg-slate-950/25 flex items-center justify-between gap-2">
                           <div className="min-w-0 flex-1 pointer-events-none">
                             <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                               {file.name}
@@ -1030,7 +1199,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                               {formatFileSize(file.size)}
                             </p>
                           </div>
-                          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <div className="shrink-0" data-no-drag onClick={(e) => e.stopPropagation()}>
                           <FileActionsMenu
                             file={file}
                             onPreview={toastPreview}
@@ -1108,14 +1277,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     <tr
                       onClick={(e) => handleItemClick(e, file)}
                       onDoubleClick={() => handleItemDoubleClick(file)}
+                      onMouseDown={(e) => handlePointerDown(e, file, "list-row")}
                       onTouchStart={() => handleTouchStartItem(file)}
                       onTouchEnd={handleTouchEndItem}
                       onTouchMove={handleTouchEndItem}
-                      draggable={true}
-                      onDragStart={(e) => handleDragStart(e, file)}
-                      onDragEnd={handleDragEnd}
-                      onDragOver={(e) => isDir && handleDragOverCard(e, file.id)}
-                      onDrop={(e) => isDir && handleDrop(e, file.id)}
                       {...(isDir ? { 'data-folder-id': file.id } : {})}
                       style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                       className={cn(
@@ -1125,7 +1290,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                       )}
                     >
-                      <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-3 px-4 text-center" data-no-drag onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1154,7 +1319,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       <td className="py-3 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400 pointer-events-none">
                         {new Date(file.uploadedAt).toLocaleDateString()}
                       </td>
-                      <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-3 px-4 text-center" data-no-drag onClick={(e) => e.stopPropagation()}>
                         <FileActionsMenu
                           file={file}
                           onPreview={toastPreview}
@@ -1176,6 +1341,63 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             </tbody>
           </table>
         </div>
+      )}
+
+      {internalDrag && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed z-50 pointer-events-none rounded-2xl shadow-2xl"
+          style={{
+            left: internalDrag.x - internalDrag.offsetX,
+            top: internalDrag.y - internalDrag.offsetY,
+            width: internalDrag.width,
+            height: internalDrag.height,
+          }}
+        >
+          {internalDrag.previewVariant === "folder-grid" ? (
+            <div className="h-full rounded-xl border border-brand-200/90 bg-white/96 dark:border-slate-700/90 dark:bg-slate-900/96 backdrop-blur-md px-3.5 pr-3.5 flex items-center justify-between gap-3 shadow-[0_16px_32px_-20px_rgba(15,23,42,0.45)]">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5]" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                  {internalDrag.previewFile.name}
+                </span>
+              </div>
+              <MoreHorizontal className="h-4 w-4 text-slate-400 shrink-0" />
+            </div>
+          ) : internalDrag.previewVariant === "list-row" ? (
+            <div className="h-full rounded-xl border border-slate-200/90 dark:border-slate-800/90 bg-white/96 dark:bg-slate-900/96 backdrop-blur-md flex items-center gap-3 px-4 shadow-[0_16px_32px_-20px_rgba(15,23,42,0.45)]">
+              <FileIcon
+                name={internalDrag.previewFile.name}
+                mime={internalDrag.previewFile.mime}
+                size="sm"
+                className="shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                  {internalDrag.previewFile.name}
+                </p>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  {internalDrag.ids.length > 1 ? `${internalDrag.ids.length} items` : formatFileSize(internalDrag.previewFile.size)}
+                </p>
+              </div>
+              <MoreHorizontal className="h-4 w-4 text-slate-400 shrink-0" />
+            </div>
+          ) : (
+            <div className="h-full rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white/96 dark:bg-slate-950/96 backdrop-blur-md overflow-hidden shadow-[0_20px_40px_-24px_rgba(15,23,42,0.5)]">
+              <div className="flex-1 h-[calc(100%-51px)] min-h-0 bg-slate-50/70 dark:bg-slate-900/40 flex items-center justify-center p-4 border-b border-slate-100 dark:border-slate-800/50">
+                <FileIcon name={internalDrag.previewFile.name} mime={internalDrag.previewFile.mime} size="lg" />
+              </div>
+              <div className="h-[51px] px-3 py-2.5 bg-white/96 dark:bg-slate-950/96">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                  {internalDrag.previewFile.name}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                  {internalDrag.ids.length > 1 ? `${internalDrag.ids.length} items` : formatFileSize(internalDrag.previewFile.size)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>,
+        document.body,
       )}
 
       {/* Floating Bulk Action Bar */}

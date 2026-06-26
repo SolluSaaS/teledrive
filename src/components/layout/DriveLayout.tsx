@@ -27,6 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
+
 export default function DriveLayout() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -84,8 +86,21 @@ export default function DriveLayout() {
     e.preventDefault();
     setSidebarDragOverPath(null);
 
-    // Read from global Zustand store — bypasses unreliable dataTransfer in Tauri WebKit
-    const fileIds = useFileStore.getState().draggedItemIds;
+    let fileIds = useFileStore.getState().draggedItemIds;
+    if (!fileIds || fileIds.length === 0) {
+      try {
+        const raw = e.dataTransfer.getData(DND_PAYLOAD_MIME) || e.dataTransfer.getData("text/plain");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.every((id) => typeof id === "string")) {
+            fileIds = parsed;
+          }
+        }
+      } catch {
+        fileIds = [];
+      }
+    }
+
     useFileStore.getState().clearDraggedItemIds();
 
     if (!fileIds || fileIds.length === 0) return;
@@ -412,6 +427,9 @@ export default function DriveLayout() {
       onDrop={handleDrop}
       className="flex flex-col h-screen overflow-hidden bg-background text-foreground relative"
     >
+      {/* Decorative ambient background blobs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/5 dark:bg-brand-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[8000ms]" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/5 dark:bg-indigo-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[12000ms]" />
       {/* Drag & Drop full screen overlay */}
       {isDragging && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/75 dark:bg-slate-950/80 backdrop-blur-lg border-4 border-dashed border-brand-500/80 m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-300 select-none pointer-events-none">
@@ -513,7 +531,7 @@ export default function DriveLayout() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar (Desktop) */}
         {!isMobile && (
-          <aside className="w-[var(--sidebar-width)] border-r border-slate-200 dark:border-slate-800/80 shrink-0">
+          <aside className="w-[var(--sidebar-width)] border-r border-slate-200/60 dark:border-slate-800/50 bg-slate-50/10 dark:bg-slate-950/10 backdrop-blur-md shrink-0 z-10">
             <SidebarContent />
           </aside>
         )}
@@ -523,7 +541,7 @@ export default function DriveLayout() {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          className="flex-1 overflow-y-auto bg-slate-50/30 dark:bg-slate-950/20 pb-[calc(var(--mobile-nav-height)+16px)] md:pb-6 relative"
+          className="flex-1 overflow-y-auto bg-slate-50/30 dark:bg-slate-950/20 pb-[calc(var(--mobile-nav-height)+16px)] md:pb-6 relative z-10"
         >
           {/* Pull to refresh spinner */}
           {(pullProgress > 0 || isRefreshing) && (

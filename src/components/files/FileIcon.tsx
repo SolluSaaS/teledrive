@@ -78,7 +78,7 @@ export const FileIcon = React.memo(function FileIcon({ name = "", mime, size = "
   return (
     <div
       className={cn(
-        "flex items-center justify-center rounded-xl transition-all duration-200",
+        "flex items-center justify-center rounded-xl transition-all duration-300 ease-out group-hover:scale-110",
         size === "lg" ? "p-4" : size === "md" ? "p-2" : "p-1",
         colorClass,
         className

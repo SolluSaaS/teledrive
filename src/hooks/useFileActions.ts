@@ -48,6 +48,28 @@ class ActionQueue {
 
 const fileActionQueue = new ActionQueue();
 
+const DIRECTORY_MIMES = new Set(["inode/directory", "application/x-directory"]);
+
+function isFolder(file: TeleFile): boolean {
+  return DIRECTORY_MIMES.has(file.mime);
+}
+
+function normalizeFolderPath(path: string): string {
+  if (!path || path === "/") return "/";
+  return `/${path.split("/").filter(Boolean).join("/")}`;
+}
+
+function getFolderFullPath(folder: TeleFile): string {
+  const parentPath = normalizeFolderPath(folder.folderPath);
+  return parentPath === "/" ? `/${folder.name}` : `${parentPath}/${folder.name}`;
+}
+
+function isSameOrDescendantPath(path: string, parentPath: string): boolean {
+  const normalizedPath = normalizeFolderPath(path);
+  const normalizedParentPath = normalizeFolderPath(parentPath);
+  return normalizedPath === normalizedParentPath || normalizedPath.startsWith(`${normalizedParentPath}/`);
+}
+
 export function useFileActions() {
   const isOperating = useFileStore((state) => state.isOperating);
   const setFiles = useFileStore((state) => state.setFiles);
@@ -416,14 +438,15 @@ export function useFileActions() {
         const channelId = await getChannelId();
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
-          const targetFiles = files.filter((f) => fileIds.includes(f.id));
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
           
           const folderPrefixes = targetFiles
-            .filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory")
-            .map((f) => f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`);
+            .filter(isFolder)
+            .map(getFolderFullPath);
 
           const updatedFiles = files.map((f) => {
-            const isInTarget = fileIds.includes(f.id);
+            const isInTarget = fileIdSet.has(f.id);
             const isInTrashedFolder = folderPrefixes.some(
               (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
             );
@@ -451,14 +474,15 @@ export function useFileActions() {
         const channelId = await getChannelId();
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
-          const targetFiles = files.filter((f) => fileIds.includes(f.id));
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
           
           const folderPrefixes = targetFiles
-            .filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory")
-            .map((f) => f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`);
+            .filter(isFolder)
+            .map(getFolderFullPath);
 
           const updatedFiles = files.map((f) => {
-            const isInTarget = fileIds.includes(f.id);
+            const isInTarget = fileIdSet.has(f.id);
             const isInRestoredFolder = folderPrefixes.some(
               (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
             );
@@ -486,14 +510,15 @@ export function useFileActions() {
         const channelId = await getChannelId();
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
-          const targetFiles = files.filter((f) => fileIds.includes(f.id));
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
           
           const folderPrefixes = targetFiles
-            .filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory")
-            .map((f) => f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`);
+            .filter(isFolder)
+            .map(getFolderFullPath);
 
           const isTargetOrInFolder = (f: TeleFile) => {
-            return fileIds.includes(f.id) || folderPrefixes.some(
+            return fileIdSet.has(f.id) || folderPrefixes.some(
               (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
             );
           };
@@ -534,14 +559,15 @@ export function useFileActions() {
         const channelId = await getChannelId();
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
-          const targetFiles = files.filter((f) => fileIds.includes(f.id));
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
           
           const folderPrefixes = targetFiles
-            .filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory")
-            .map((f) => f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`);
+            .filter(isFolder)
+            .map(getFolderFullPath);
 
           const updatedFiles = files.map((f) => {
-            const isInTarget = fileIds.includes(f.id);
+            const isInTarget = fileIdSet.has(f.id);
             const isInArchivedFolder = folderPrefixes.some(
               (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
             );
@@ -569,14 +595,15 @@ export function useFileActions() {
         const channelId = await getChannelId();
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
-          const targetFiles = files.filter((f) => fileIds.includes(f.id));
+          const fileIdSet = new Set(fileIds);
+          const targetFiles = files.filter((f) => fileIdSet.has(f.id));
           
           const folderPrefixes = targetFiles
-            .filter((f) => f.mime === "inode/directory" || f.mime === "application/x-directory")
-            .map((f) => f.folderPath === "/" ? `/${f.name}` : `${f.folderPath}/${f.name}`);
+            .filter(isFolder)
+            .map(getFolderFullPath);
 
           const updatedFiles = files.map((f) => {
-            const isInTarget = fileIds.includes(f.id);
+            const isInTarget = fileIdSet.has(f.id);
             const isInArchivedFolder = folderPrefixes.some(
               (prefix) => f.folderPath === prefix || f.folderPath.startsWith(prefix + "/")
             );
@@ -628,67 +655,95 @@ export function useFileActions() {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
+        const normalizedTargetPath = normalizeFolderPath(targetFolderPath);
+        let didMove = false;
         
         await runExclusive(async () => {
           const files = useFileStore.getState().files;
+          const selectedIdSet = new Set(fileIds);
+          const selectedFiles = files.filter((f) => selectedIdSet.has(f.id));
+
+          if (selectedFiles.length === 0) {
+            toast.info("Nothing to move");
+            return;
+          }
+
+          if (normalizedTargetPath !== "/") {
+            const targetFolderExists = files.some(
+              (f) => isFolder(f) && getFolderFullPath(f) === normalizedTargetPath
+            );
+            if (!targetFolderExists) {
+              throw new Error("Destination folder no longer exists.");
+            }
+          }
+
+          const selectedFolders = selectedFiles.filter(isFolder);
+          const selectedFolderPaths = selectedFolders.map((folder) => ({
+            folder,
+            fullPath: getFolderFullPath(folder),
+          }));
+
+          for (const { folder, fullPath } of selectedFolderPaths) {
+            if (isSameOrDescendantPath(normalizedTargetPath, fullPath)) {
+              throw new Error(`Cannot move folder "${folder.name}" into itself or its subfolders.`);
+            }
+          }
+
+          const rootSelectedIds = new Set<string>();
+          for (const file of selectedFiles) {
+            const filePath = isFolder(file) ? getFolderFullPath(file) : normalizeFolderPath(file.folderPath);
+            const isCoveredBySelectedParent = selectedFolderPaths.some(
+              ({ folder, fullPath }) => folder.id !== file.id && isSameOrDescendantPath(filePath, fullPath)
+            );
+
+            if (!isCoveredBySelectedParent) {
+              rootSelectedIds.add(file.id);
+            }
+          }
+
+          const movedRootFolders = selectedFolders
+            .filter((folder) => rootSelectedIds.has(folder.id))
+            .map((folder) => {
+              const oldFullPath = getFolderFullPath(folder);
+              const newFullPath = normalizedTargetPath === "/"
+                ? `/${folder.name}`
+                : `${normalizedTargetPath}/${folder.name}`;
+              return { folder, oldFullPath, newFullPath };
+            });
           
-          // Map of moves to apply
           const updatedFiles = files.map((f) => {
-            if (!fileIds.includes(f.id)) return f;
-            
-            const isFolder = f.mime === "inode/directory" || f.mime === "application/x-directory";
-            const oldFolderPath = f.folderPath;
-            if (oldFolderPath === targetFolderPath) return f;
+            if (rootSelectedIds.has(f.id)) {
+              if (normalizeFolderPath(f.folderPath) === normalizedTargetPath) return f;
+              return { ...f, folderPath: normalizedTargetPath };
+            }
 
-            if (isFolder) {
-              const folderFullPath = oldFolderPath === "/" 
-                ? `/${f.name}` 
-                : `${oldFolderPath}/${f.name}`;
-
-              // Prevent moving a folder into itself or its subfolders
-              if (targetFolderPath === folderFullPath || targetFolderPath.startsWith(folderFullPath + "/")) {
-                throw new Error(`Cannot move folder "${f.name}" into itself or its subfolders.`);
+            for (const { oldFullPath, newFullPath } of movedRootFolders) {
+              const currentPath = normalizeFolderPath(f.folderPath);
+              if (currentPath === oldFullPath) {
+                return { ...f, folderPath: newFullPath };
+              }
+              if (currentPath.startsWith(`${oldFullPath}/`)) {
+                return { ...f, folderPath: `${newFullPath}${currentPath.substring(oldFullPath.length)}` };
               }
             }
 
-            return { ...f, folderPath: targetFolderPath };
-          });
-
-          // Now propagate folderPath updates for children of moved folders
-          const movedFolders = files.filter(f => fileIds.includes(f.id) && (f.mime === "inode/directory" || f.mime === "application/x-directory"));
-          
-          const finalFiles = updatedFiles.map((f) => {
-            if (fileIds.includes(f.id)) return f;
-
-            for (const parentFolder of movedFolders) {
-              const oldParentPath = parentFolder.folderPath;
-              const folderFullPath = oldParentPath === "/" 
-                ? `/${parentFolder.name}` 
-                : `${oldParentPath}/${parentFolder.name}`;
-
-              if (targetFolderPath === folderFullPath || targetFolderPath.startsWith(folderFullPath + "/")) {
-                continue; // skipped in first loop, but safe check
-              }
-
-              const targetFullPath = targetFolderPath === "/" 
-                ? `/${parentFolder.name}` 
-                : `${targetFolderPath}/${parentFolder.name}`;
-
-              if (f.folderPath === folderFullPath) {
-                return { ...f, folderPath: targetFullPath };
-              }
-              if (f.folderPath.startsWith(folderFullPath + "/")) {
-                return { ...f, folderPath: targetFullPath + f.folderPath.substring(folderFullPath.length) };
-              }
-            }
             return f;
           });
 
-          await saveIndex(channelId, finalFiles);
-          setFiles(finalFiles);
+          const hasChanges = updatedFiles.some((file, index) => file !== files[index]);
+          if (!hasChanges) {
+            toast.info("Items are already in that folder");
+            return;
+          }
+
+          await saveIndex(channelId, updatedFiles);
+          setFiles(updatedFiles);
+          didMove = true;
         });
 
-        toast.success(`Successfully moved ${fileIds.length} item(s)`);
+        if (didMove) {
+          toast.success(`Successfully moved ${fileIds.length} item(s)`);
+        }
       } catch (err: any) {
         console.error("Failed to move items:", err);
         toast.error(err.message || "Failed to move items");
