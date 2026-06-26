@@ -374,3 +374,20 @@ export function updateFileLocal(
 ): TeleFile[] {
   return files.map((f) => (f.id === fileId ? { ...f, ...patch } : f));
 }
+
+/** Adds multiple file entries to the index in a single save round-trip. */
+export async function addFilesBatch(channelId: string, newFiles: TeleFile[]): Promise<TeleFile[]> {
+  return runExclusive(async () => {
+    const files = useFileStore.getState().files;
+    const byId = new Map<string, TeleFile>();
+    for (const f of files) {
+      byId.set(f.id, f);
+    }
+    for (const f of newFiles) {
+      byId.set(f.id, f);
+    }
+    const updatedFiles = Array.from(byId.values());
+    await saveIndex(channelId, updatedFiles);
+    return updatedFiles;
+  });
+}

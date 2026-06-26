@@ -66,7 +66,6 @@ function getMimeFromExtension(fileName: string): string {
   return EXTENSION_MIME_MAP[ext] ?? "application/octet-stream";
 }
 import { uploadFileToTelegram } from "../telegram/uploader";
-import { addFile } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useAuthStore } from "../../stores/authStore";
 import { TeleFile, UploadItem } from "../types";
@@ -196,53 +195,15 @@ export async function processQueue(): Promise<void> {
             trashed: false,
           };
 
-          // --- Phase 2: Save metadata index to Telegram ---
-          // Retry up to 3 times with exponential back-off for index-save errors
-          // (especially EDIT_MESSAGE_TEMP_RESTRICTED in new channels).
-          let updatedFiles: TeleFile[] | null = null;
-          let lastIndexErr: any = null;
+          // --- Phase 2: Save metadata index to Telegram (Debounced & Batched) ---
+          const existingFiles = useFileStore.getState().files;
+          setFiles([...existingFiles.filter((f) => f.id !== newFile.id), newFile]);
+          
+          updateQueueItem(item.id, { status: "done", progress: 100 });
+          toast.success(`"${item.name}" uploaded successfully!`);
 
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              updatedFiles = await addFile(channelId, newFile);
-              lastIndexErr = null;
-              break;
-            } catch (indexErr: any) {
-              lastIndexErr = indexErr;
-              await invoke("log_vault_state", {
-                state: `INDEX_SAVE_ATTEMPT_${attempt}_ERR: ${indexErr?.message}`
-              }).catch(() => {});
-              if (attempt < 3) {
-                await new Promise((r) => setTimeout(r, 1500 * attempt));
-              }
-            }
-          }
-
-          if (updatedFiles) {
-            // Index saved — full success
-            setFiles(updatedFiles);
-            updateQueueItem(item.id, { status: "done", progress: 100 });
-            toast.success(`"${item.name}" uploaded successfully!`);
-          } else {
-            // File reached Telegram but index could not be saved.
-            // Save to local store at least so it's visible until app restarts.
-            const existingFiles = useFileStore.getState().files;
-            setFiles([...existingFiles.filter((f) => f.id !== newFile.id), newFile]);
-
-            updateQueueItem(item.id, {
-              status: "done",
-              progress: 100,
-              error: "Uploaded to Telegram but index save failed — file may disappear after restart.",
-            });
-
-            await invoke("log_vault_state", {
-              state: `UPLOAD_INDEX_FAIL: ${item.name} — ${lastIndexErr?.message || lastIndexErr}`
-            }).catch(() => {});
-
-            toast.warning(
-              `"${item.name}" uploaded, but saving the file list failed. Try refreshing.`
-            );
-          }
+          pendingIndexFiles.push(newFile);
+          scheduleIndexFlush(channelId);
         } catch (err: any) {
           console.error(`Upload error for ${item.name}:`, err);
           await invoke("log_vault_state", {
@@ -268,6 +229,65 @@ export async function processQueue(): Promise<void> {
   }
 }
 
+// ─── Debounced Batch Index Saving ───────────────────────────────────────────
+let pendingIndexFiles: TeleFile[] = [];
+let flushTimeoutId: any = null;
+
+async function flushIndexQueue(channelId: string) {
+  if (pendingIndexFiles.length === 0) return;
+  
+  const toSave = [...pendingIndexFiles];
+  pendingIndexFiles = []; // Clear queue immediately to handle new completions
+  
+  await invoke("log_vault_state", {
+    state: `BATCH_INDEX_FLUSH: Starting flush of ${toSave.length} files to Telegram`
+  }).catch(() => {});
+
+  let success = false;
+  let lastIndexErr: any = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { addFilesBatch } = await import("../storage/metadataStore");
+      const updated = await addFilesBatch(channelId, toSave);
+      useFileStore.getState().setFiles(updated);
+      success = true;
+      break;
+    } catch (indexErr: any) {
+      lastIndexErr = indexErr;
+      await invoke("log_vault_state", {
+        state: `BATCH_INDEX_SAVE_ATTEMPT_${attempt}_ERR: ${indexErr?.message || JSON.stringify(indexErr)}`
+      }).catch(() => {});
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+  }
+
+  if (!success) {
+    await invoke("log_vault_state", {
+      state: `BATCH_INDEX_SAVE_FAIL: ${toSave.map((f) => f.name).join(", ")} - err=${lastIndexErr?.message || JSON.stringify(lastIndexErr)}`
+    }).catch(() => {});
+    toast.warning("Failed to save file list to the cloud. Try refreshing your drive.");
+  }
+}
+
+function scheduleIndexFlush(channelId: string) {
+  if (flushTimeoutId) {
+    clearTimeout(flushTimeoutId);
+  }
+
+  const { uploadQueue } = useFileStore.getState();
+  const activeUploads = uploadQueue.filter((item) => item.status === "uploading");
+
+  // Flush immediately (300ms) if all uploads finished, else wait 2000ms to batch concurrent uploads
+  const delay = activeUploads.length === 0 ? 300 : 2000;
+
+  flushTimeoutId = setTimeout(() => {
+    flushIndexQueue(channelId);
+  }, delay);
+}
+
 /**
  * Enqueues a list of files and starts the upload processing queue.
  */
@@ -275,8 +295,16 @@ export function addFilesToUploadQueue(
   files: (File | { name: string; size: number; path: string; type: string })[]
 ) {
   const { addToQueue, currentFolder } = useFileStore.getState();
+  let addedCount = 0;
 
   files.forEach((file) => {
+    if (file.size === 0) {
+      toast.error(`"${file.name}" is empty. Empty files (0 bytes) are not supported by Telegram.`, {
+        duration: 4000,
+      });
+      return;
+    }
+
     const uploadItem: UploadItem = {
       id: Math.random().toString(36).substring(2, 11),
       name: file.name,
@@ -287,8 +315,11 @@ export function addFilesToUploadQueue(
       folderPath: currentFolder,
     };
     addToQueue(uploadItem);
+    addedCount++;
   });
 
-  // Trigger processor shortly after
-  setTimeout(() => processQueue(), 50);
+  // Trigger processor shortly after if we actually added items
+  if (addedCount > 0) {
+    setTimeout(() => processQueue(), 50);
+  }
 }

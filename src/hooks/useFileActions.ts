@@ -62,8 +62,45 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const updated = await updateFile(channelId, fileId, { name: newName.trim() });
-      setFiles(updated);
+      
+      const allFiles = useFileStore.getState().files;
+      const fileToRename = allFiles.find((f) => f.id === fileId);
+      if (!fileToRename) throw new Error("File not found");
+
+      const isFolder = fileToRename.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const oldPath = fileToRename.folderPath === "/" 
+          ? `/${fileToRename.name}` 
+          : `${fileToRename.folderPath}/${fileToRename.name}`;
+        
+        const newPath = fileToRename.folderPath === "/" 
+          ? `/${newName.trim()}` 
+          : `${fileToRename.folderPath}/${newName.trim()}`;
+
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const updatedFiles = files.map((f) => {
+            if (f.id === fileId) {
+              return { ...f, name: newName.trim() };
+            }
+            if (f.folderPath === oldPath) {
+              return { ...f, folderPath: newPath };
+            }
+            if (f.folderPath.startsWith(oldPath + "/")) {
+              return { ...f, folderPath: newPath + f.folderPath.substring(oldPath.length) };
+            }
+            return f;
+          });
+          await saveIndex(channelId, updatedFiles);
+          updated = updatedFiles;
+        });
+      } else {
+        updated = await updateFile(channelId, fileId, { name: newName.trim() });
+      }
+      
+      setFiles(updated!);
       toast.success("Renamed successfully");
     } catch (err: any) {
       console.error("Failed to rename:", err);
@@ -92,8 +129,30 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const updated = await updateFile(channelId, file.id, { trashed: true });
-      setFiles(updated);
+      const isFolder = file.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const folderPathPrefix = file.folderPath === "/" 
+          ? `/${file.name}` 
+          : `${file.folderPath}/${file.name}`;
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const updatedFiles = files.map((f) => {
+            if (f.id === file.id || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/")) {
+              return { ...f, trashed: true };
+            }
+            return f;
+          });
+          await saveIndex(channelId, updatedFiles);
+          updated = updatedFiles;
+        });
+      } else {
+        updated = await updateFile(channelId, file.id, { trashed: true });
+      }
+
+      setFiles(updated!);
       toast.success(`Moved "${file.name}" to Trash`);
     } catch (err: any) {
       console.error("Failed to move to trash:", err);
@@ -107,8 +166,30 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const updated = await updateFile(channelId, file.id, { trashed: false });
-      setFiles(updated);
+      const isFolder = file.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const folderPathPrefix = file.folderPath === "/" 
+          ? `/${file.name}` 
+          : `${file.folderPath}/${file.name}`;
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const updatedFiles = files.map((f) => {
+            if (f.id === file.id || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/")) {
+              return { ...f, trashed: false };
+            }
+            return f;
+          });
+          await saveIndex(channelId, updatedFiles);
+          updated = updatedFiles;
+        });
+      } else {
+        updated = await updateFile(channelId, file.id, { trashed: false });
+      }
+
+      setFiles(updated!);
       toast.success(`Restored "${file.name}"`);
     } catch (err: any) {
       console.error("Failed to restore:", err);
@@ -122,9 +203,30 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      // Archiving clears starred so the file leaves the Starred view too
-      const updated = await updateFile(channelId, file.id, { archived: true, starred: false });
-      setFiles(updated);
+      const isFolder = file.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const folderPathPrefix = file.folderPath === "/" 
+          ? `/${file.name}` 
+          : `${file.folderPath}/${file.name}`;
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const updatedFiles = files.map((f) => {
+            if (f.id === file.id || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/")) {
+              return { ...f, archived: true, starred: false };
+            }
+            return f;
+          });
+          await saveIndex(channelId, updatedFiles);
+          updated = updatedFiles;
+        });
+      } else {
+        updated = await updateFile(channelId, file.id, { archived: true, starred: false });
+      }
+
+      setFiles(updated!);
       toast.success(`"${file.name}" archived`);
     } catch (err: any) {
       console.error("Failed to archive:", err);
@@ -138,8 +240,30 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const updated = await updateFile(channelId, file.id, { archived: false });
-      setFiles(updated);
+      const isFolder = file.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const folderPathPrefix = file.folderPath === "/" 
+          ? `/${file.name}` 
+          : `${file.folderPath}/${file.name}`;
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const updatedFiles = files.map((f) => {
+            if (f.id === file.id || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/")) {
+              return { ...f, archived: false };
+            }
+            return f;
+          });
+          await saveIndex(channelId, updatedFiles);
+          updated = updatedFiles;
+        });
+      } else {
+        updated = await updateFile(channelId, file.id, { archived: false });
+      }
+
+      setFiles(updated!);
       toast.success(`"${file.name}" moved back to My Drive`);
     } catch (err: any) {
       console.error("Failed to unarchive:", err);
@@ -158,8 +282,44 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const updated = await removeFile(channelId, fileId);
-      setFiles(updated);
+      const allFiles = useFileStore.getState().files;
+      const fileToDelete = allFiles.find((f) => f.id === fileId);
+      if (!fileToDelete) throw new Error("File not found");
+
+      const isFolder = fileToDelete.mime === "inode/directory";
+      let updated: TeleFile[];
+
+      if (isFolder) {
+        const folderPathPrefix = fileToDelete.folderPath === "/" 
+          ? `/${fileToDelete.name}` 
+          : `${fileToDelete.folderPath}/${fileToDelete.name}`;
+        
+        await runExclusive(async () => {
+          const files = useFileStore.getState().files;
+          const targets = files.filter((f) => f.id === fileId || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/"));
+          const active = files.filter((f) => f.id !== fileId && f.folderPath !== folderPathPrefix && !f.folderPath.startsWith(folderPathPrefix + "/"));
+
+          // Delete all target Telegram messages in parallel (folders have messageId=0 — skip)
+          const deletionPromises = targets
+            .filter((f) => f.messageId && f.messageId !== 0)
+            .map((f) =>
+              deleteTelegramMessage(channelId, f.messageId).catch((err) => {
+                console.warn(
+                  `[deletePermanently] Could not delete message ${f.messageId} for "${f.name}":`,
+                  err?.message || err
+                );
+              })
+            );
+
+          await Promise.allSettled(deletionPromises);
+          await saveIndex(channelId, active);
+          updated = active;
+        });
+      } else {
+        updated = await removeFile(channelId, fileId);
+      }
+
+      setFiles(updated!);
       toast.success("Deleted permanently");
     } catch (err: any) {
       console.error("Failed to delete permanently:", err);

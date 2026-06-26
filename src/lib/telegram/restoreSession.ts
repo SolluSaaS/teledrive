@@ -31,8 +31,9 @@ export async function restoreSession(): Promise<boolean> {
       );
       sessionString = stored?.session ?? null;
       phoneNumber   = stored?.phone   ?? "";
+      const maskedPhone = phoneNumber ? phoneNumber.slice(0, 4) + "****" + phoneNumber.slice(-4) : "empty";
       await invoke("log_vault_state", {
-        state: `RESTORE_LAUNCH: hasSession=${!!sessionString} sessionLen=${sessionString?.length ?? 0} phone=${phoneNumber}`,
+        state: `RESTORE_LAUNCH: hasSession=${!!sessionString} sessionLen=${sessionString?.length ?? 0} phone=${maskedPhone}`,
       });
     } catch (loadErr: any) {
       await invoke("log_vault_state", {
