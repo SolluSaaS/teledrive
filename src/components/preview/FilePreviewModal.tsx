@@ -102,6 +102,18 @@ function formatTime(seconds: number): string {
   return `${pad(m)}:${pad(s)}`;
 }
 
+function sanitizeHtml(html: string): string {
+  let clean = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  clean = clean.replace(/on\w+\s*=\s*(['"])(?:(?!\1).)*\1/gi, "");
+  clean = clean.replace(/on\w+\s*=\s*[^>\s]+/gi, "");
+  clean = clean.replace(/href\s*=\s*(['"])javascript:(?:(?!\1).)*\1/gi, 'href="#"');
+  clean = clean.replace(/src\s*=\s*(['"])javascript:(?:(?!\1).)*\1/gi, "");
+  clean = clean.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "");
+  clean = clean.replace(/<embed\b[^>]*>/gi, "");
+  clean = clean.replace(/<object\b[^>]*>/gi, "");
+  return clean;
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -539,7 +551,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
           if (mimeLower === "text/markdown" || file.name.endsWith(".md")) {
             const html = await marked.parse(text);
-            if (current) setMarkdownHtml(html);
+            if (current) setMarkdownHtml(sanitizeHtml(html));
           }
 
           if (initialEditMode && current) {
@@ -599,7 +611,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
       setTextContent(editContent);
       if (file.name.endsWith(".md")) {
-        setMarkdownHtml(await marked.parse(editContent));
+        setMarkdownHtml(sanitizeHtml(await marked.parse(editContent)));
       } else {
         setMarkdownHtml(null);
       }

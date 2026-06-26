@@ -17,10 +17,7 @@ fn log_vault_state(state: String) {
     }
 }
 
-#[tauri::command]
-fn delete_file(path: String) -> bool {
-    std::fs::remove_file(path).is_ok()
-}
+
 
 /// Saves the Telegram session string to a simple JSON file in the app data directory.
 /// This is reliable, fast, and survives dev-server restarts without Stronghold overhead.
@@ -179,7 +176,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             log_vault_state,
-            delete_file,
             save_session,
             load_session,
             clear_session,
