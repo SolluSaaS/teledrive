@@ -157,7 +157,7 @@ export async function processQueue(): Promise<void> {
             throw new Error("No valid file reference or path found.");
           }
 
-          const currentFolder = useFileStore.getState().currentFolder;
+          const destinationFolder = item.folderPath || "/";
 
           // --- Phase 1: Upload file bytes to Telegram ---
           const message = await uploadFileToTelegram(
@@ -165,6 +165,7 @@ export async function processQueue(): Promise<void> {
             item.name,
             item.size,
             fileSource,
+            destinationFolder,
             (uploaded, total) => {
               const pct = Math.round((uploaded / total) * 100);
               // Cap at 95% until indexing succeeds
@@ -187,7 +188,7 @@ export async function processQueue(): Promise<void> {
             name: item.name,
             size: item.size,
             mime: mimeType,
-            folderPath: currentFolder,
+            folderPath: destinationFolder,
             messageId: message.id,
             channelId,
             uploadedAt: Date.now(),
@@ -273,7 +274,7 @@ export async function processQueue(): Promise<void> {
 export function addFilesToUploadQueue(
   files: (File | { name: string; size: number; path: string; type: string })[]
 ) {
-  const { addToQueue } = useFileStore.getState();
+  const { addToQueue, currentFolder } = useFileStore.getState();
 
   files.forEach((file) => {
     const uploadItem: UploadItem = {
@@ -283,6 +284,7 @@ export function addFilesToUploadQueue(
       progress: 0,
       status: "pending",
       file: file,
+      folderPath: currentFolder,
     };
     addToQueue(uploadItem);
   });

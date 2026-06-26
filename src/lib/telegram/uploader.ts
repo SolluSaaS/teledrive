@@ -19,6 +19,7 @@ export async function uploadFileToTelegram(
   fileName: string,
   fileSize: number,
   filePathOrFile: string | File,
+  folderPath: string = "/",
   onProgress?: UploadProgressCallback
 ): Promise<any> {
   const client = getClient();
@@ -118,11 +119,12 @@ export async function uploadFileToTelegram(
       });
     }
     
-    // Send document to storage channel
+    // Send document to storage channel with folder path JSON metadata caption
+    const caption = `teledrive_file:${JSON.stringify({ folder: folderPath })}`;
     const result = await client.sendFile(channelId, {
       file: inputFile,
       forceDocument: true,
-      caption: fileName,
+      caption,
     });
     
     return result;

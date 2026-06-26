@@ -29,5 +29,6 @@ export interface UploadItem {
   progress: number;
   status: 'pending' | 'uploading' | 'done' | 'error';
   file?: SelectedFile | File;
+  folderPath?: string;
   error?: string;
 }

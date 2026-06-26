@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
-import { addFile, removeFile, updateFile, deleteTelegramMessage } from "../lib/storage/metadataStore";
+import { addFile, removeFile, updateFile, deleteTelegramMessage, runExclusive } from "../lib/storage/metadataStore";
 import { saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
@@ -186,39 +186,41 @@ export function useFileActions() {
     setIsOperating(true);
     try {
       const channelId = await getChannelId();
-      const allFiles = useFileStore.getState().files;
+      await runExclusive(async () => {
+        const allFiles = useFileStore.getState().files;
 
-      const trashed = allFiles.filter((f) => f.trashed);
-      const active = allFiles.filter((f) => !f.trashed);
+        const trashed = allFiles.filter((f) => f.trashed);
+        const active = allFiles.filter((f) => !f.trashed);
 
-      if (trashed.length === 0) {
-        toast.info("Trash is already empty");
-        return;
-      }
+        if (trashed.length === 0) {
+          toast.info("Trash is already empty");
+          return;
+        }
 
-      // Delete Telegram messages in parallel (folders have messageId=0 — skip)
-      const deletionPromises = trashed
-        .filter((f) => f.messageId && f.messageId !== 0)
-        .map((f) =>
-          deleteTelegramMessage(channelId, f.messageId).catch((err) => {
-            console.warn(
-              `[emptyTrash] Could not delete message ${f.messageId} for "${f.name}":`,
-              err?.message || err
-            );
-          })
+        // Delete Telegram messages in parallel (folders have messageId=0 — skip)
+        const deletionPromises = trashed
+          .filter((f) => f.messageId && f.messageId !== 0)
+          .map((f) =>
+            deleteTelegramMessage(channelId, f.messageId).catch((err) => {
+              console.warn(
+                `[emptyTrash] Could not delete message ${f.messageId} for "${f.name}":`,
+                err?.message || err
+              );
+            })
+          );
+
+        await Promise.allSettled(deletionPromises);
+
+        // Save the index without the trashed files
+        await saveIndex(channelId, active);
+        setFiles(active);
+
+        toast.success(
+          trashed.length === 1
+            ? "1 item deleted permanently"
+            : `${trashed.length} items deleted permanently`
         );
-
-      await Promise.allSettled(deletionPromises);
-
-      // Save the index without the trashed files
-      await saveIndex(channelId, active);
-      setFiles(active);
-
-      toast.success(
-        trashed.length === 1
-          ? "1 item deleted permanently"
-          : `${trashed.length} items deleted permanently`
-      );
+      });
     } catch (err: any) {
       console.error("Failed to empty trash:", err);
       toast.error(err.message || "Failed to empty trash");

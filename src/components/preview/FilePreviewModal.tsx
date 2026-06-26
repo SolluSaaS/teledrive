@@ -7,7 +7,7 @@
  * Edit mode  → CodeEditor (CodeMirror 6, lazy, theme-aware via Compartment)
  * Binary     → native <img>, <video>, <audio>, <iframe>
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   X,
   Download,
@@ -24,6 +24,20 @@ import {
   Music,
   FileSpreadsheet,
   ExternalLink,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  RotateCw,
+  Grid3X3,
+  Info,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Minimize,
+  SkipForward,
+  SkipBack,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/downloader";
@@ -70,6 +84,24 @@ function FileTypeIcon({ mime, name }: { mime: string; name: string }) {
   return <FileText className="h-4 w-4 text-slate-400 shrink-0" />;
 }
 
+function formatSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
+function formatTime(seconds: number): string {
+  if (isNaN(seconds)) return "00:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${pad(m)}:${pad(s)}`;
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -97,6 +129,239 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   const [isSaving, setIsSaving]       = useState(false);
   const [saveStatus, setSaveStatus]   = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [cursorPos, setCursorPos]     = useState({ line: 1, col: 1 });
+
+  // ── Image preview states ──────────────────────────────────────────────────
+  const [zoom, setZoom]               = useState(1);
+  const [pan, setPan]                 = useState({ x: 0, y: 0 });
+  const [rotation, setRotation]       = useState(0);
+  const [showGrid, setShowGrid]       = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+  const [dimensions, setDimensions]   = useState<{ width: number; height: number } | null>(null);
+  const [isDragging, setIsDragging]   = useState(false);
+  const [dragStart, setDragStart]     = useState({ x: 0, y: 0 });
+
+  // ── Video preview states & refs ──────────────────────────────────────────
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoVolume, setVideoVolume] = useState(1);
+  const [isVideoMuted, setIsVideoMuted] = useState(false);
+  const [videoSpeed, setVideoSpeed] = useState(1);
+  const [isVideoFullscreen, setIsVideoFullscreen] = useState(false);
+  const [showVideoControls, setShowVideoControls] = useState(true);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+
+  // ── Audio preview states & refs ──────────────────────────────────────────
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioVolume, setAudioVolume] = useState(1);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [audioSpeed, setAudioSpeed] = useState(1);
+  const [showAudioSpeedMenu, setShowAudioSpeedMenu] = useState(false);
+
+  // Video autohide controls effect
+  const lastActiveRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (!file || !file.mime.startsWith("video/")) return;
+    const handleMouseMove = () => {
+      setShowVideoControls(true);
+      lastActiveRef.current = Date.now();
+    };
+    const container = videoContainerRef.current;
+    if (container) {
+      container.addEventListener("mousemove", handleMouseMove);
+      container.addEventListener("mouseleave", () => setShowVideoControls(false));
+    }
+    const interval = setInterval(() => {
+      if (Date.now() - lastActiveRef.current > 2000 && isVideoPlaying) {
+        setShowVideoControls(false);
+        setShowSpeedMenu(false);
+      }
+    }, 500);
+    return () => {
+      if (container) {
+        container.removeEventListener("mousemove", handleMouseMove);
+      }
+      clearInterval(interval);
+    };
+  }, [file, isVideoPlaying]);
+
+  // Video fullscreen handler
+  const handleVideoFullscreen = useCallback(() => {
+    if (!videoContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      videoContainerRef.current.requestFullscreen().catch((err) => {
+        console.error("Error attempting to enable fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsVideoFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
+  // Video control handlers
+  const togglePlayVideo = useCallback(() => {
+    if (!videoRef.current) return;
+    if (isVideoPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(console.error);
+    }
+  }, [isVideoPlaying]);
+
+  const handleVideoTimeUpdate = useCallback(() => {
+    if (!videoRef.current) return;
+    setVideoCurrentTime(videoRef.current.currentTime);
+  }, []);
+
+  const handleVideoLoadedMetadata = useCallback(() => {
+    if (!videoRef.current) return;
+    setVideoDuration(videoRef.current.duration);
+  }, []);
+
+  const handleVideoSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoRef.current) return;
+    const val = parseFloat(e.target.value);
+    videoRef.current.currentTime = val;
+    setVideoCurrentTime(val);
+  }, []);
+
+  const handleVideoVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoRef.current) return;
+    const val = parseFloat(e.target.value);
+    videoRef.current.volume = val;
+    setVideoVolume(val);
+    if (val > 0) {
+      videoRef.current.muted = false;
+      setIsVideoMuted(false);
+    }
+  }, []);
+
+  const toggleVideoMute = useCallback(() => {
+    if (!videoRef.current) return;
+    const nextMuted = !isVideoMuted;
+    videoRef.current.muted = nextMuted;
+    setIsVideoMuted(nextMuted);
+  }, [isVideoMuted]);
+
+  const handleVideoSpeedChange = useCallback((speed: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.playbackRate = speed;
+    setVideoSpeed(speed);
+    setShowSpeedMenu(false);
+  }, []);
+
+  const skipVideo = useCallback((amount: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = Math.min(
+      Math.max(videoRef.current.currentTime + amount, 0),
+      videoRef.current.duration || 0
+    );
+  }, []);
+
+  // Audio control handlers
+  const togglePlayAudio = useCallback(() => {
+    if (!audioRef.current) return;
+    if (isAudioPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch(console.error);
+    }
+  }, [isAudioPlaying]);
+
+  const handleAudioTimeUpdate = useCallback(() => {
+    if (!audioRef.current) return;
+    setAudioCurrentTime(audioRef.current.currentTime);
+  }, []);
+
+  const handleAudioLoadedMetadata = useCallback(() => {
+    if (!audioRef.current) return;
+    setAudioDuration(audioRef.current.duration);
+  }, []);
+
+  const handleAudioSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!audioRef.current) return;
+    const val = parseFloat(e.target.value);
+    audioRef.current.currentTime = val;
+    setAudioCurrentTime(val);
+  }, []);
+
+  const handleAudioVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!audioRef.current) return;
+    const val = parseFloat(e.target.value);
+    audioRef.current.volume = val;
+    setAudioVolume(val);
+    if (val > 0) {
+      audioRef.current.muted = false;
+      setIsAudioMuted(false);
+    }
+  }, []);
+
+  const toggleAudioMute = useCallback(() => {
+    if (!audioRef.current) return;
+    const nextMuted = !isAudioMuted;
+    audioRef.current.muted = nextMuted;
+    setIsAudioMuted(nextMuted);
+  }, [isAudioMuted]);
+
+  const handleAudioSpeedChange = useCallback((speed: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.playbackRate = speed;
+    setAudioSpeed(speed);
+    setShowAudioSpeedMenu(false);
+  }, []);
+
+  const skipAudio = useCallback((amount: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = Math.min(
+      Math.max(audioRef.current.currentTime + amount, 0),
+      audioRef.current.duration || 0
+    );
+  }, []);
+
+  const zoomIn = useCallback(() => setZoom(z => Math.min(z + 0.25, 4)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z - 0.25, 0.25)), []);
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setRotation(0);
+  }, []);
+  const rotateClockwise = useCallback(() => setRotation(r => (r + 90) % 360), []);
+  const rotateCounterClockwise = useCallback(() => setRotation(r => (r - 90) % 360), []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only left click drag
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+  }, [isDragging, dragStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    // Only zoom when over the image container
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    setZoom(z => Math.min(Math.max(z * factor, 0.25), 4));
+  }, []);
 
   // ── Theme-derived surface colors ─────────────────────────────────────────
   const colors = useMemo(() => isDark ? {
@@ -240,7 +505,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       const newFile = new File([bytes], file.name, { type: file.mime });
 
       const message = await uploadFileToTelegram(
-        file.channelId, file.name, bytes.length, newFile, () => {}
+        file.channelId, file.name, bytes.length, newFile, file.folderPath ?? "/", () => {}
       );
 
       try { await deleteTelegramMessage(file.channelId, file.messageId); } catch { /* best-effort */ }
@@ -431,6 +696,18 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
                   <span className="hidden sm:inline">Edit</span>
                 </button>
               )}
+              {isImage && (
+                <button
+                  onClick={() => setShowDetails(!showDetails)}
+                  title="Toggle details"
+                  className={`flex items-center justify-center h-7 w-8 rounded-lg cursor-pointer transition-colors duration-150 ${showDetails ? "text-blue-500 bg-blue-500/10 dark:bg-blue-500/20" : ""}`}
+                  style={{ color: showDetails ? undefined : colors.muted }}
+                  onMouseEnter={e => { if (!showDetails) e.currentTarget.style.background = colors.hover; }}
+                  onMouseLeave={e => { if (!showDetails) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              )}
               <button
                 onClick={handleDownload}
                 title="Download"
@@ -517,65 +794,518 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
             {/* IMAGE */}
             {isImage && contentUrl && (
-              <div
-                className="w-full h-full flex items-center justify-center p-6"
-                style={{
-                  backgroundImage: `radial-gradient(circle at center, ${colors.dotGrid} 1px, transparent 1px)`,
-                  backgroundSize: "20px 20px",
-                }}
-              >
-                <img
-                  src={contentUrl}
-                  alt={file.name}
-                  className="max-w-full max-h-full object-contain select-text"
-                  style={{ borderRadius: "8px", boxShadow: "0 25px 60px rgba(0,0,0,0.5)" }}
-                />
+              <div className="w-full h-full flex relative overflow-hidden">
+                {/* Main Viewport */}
+                <div
+                  className="flex-1 h-full flex items-center justify-center p-6 relative overflow-hidden select-none cursor-grab active:cursor-grabbing"
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  onWheel={handleWheel}
+                  style={{
+                    backgroundImage: showGrid
+                      ? `radial-gradient(circle at center, ${colors.dotGrid} 1px, transparent 1px)`
+                      : "none",
+                    backgroundSize: "20px 20px",
+                    backgroundColor: showGrid ? (isDark ? "#080c10" : "#fafafa") : colors.bg,
+                  }}
+                >
+                  <div
+                    style={{
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${rotation}deg)`,
+                      transition: isDragging ? "none" : "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+                    }}
+                  >
+                    <img
+                      src={contentUrl}
+                      alt={file.name}
+                      onLoad={(e) => {
+                        const img = e.currentTarget;
+                        setDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+                      }}
+                      className="max-w-[85vw] max-h-[80vh] object-contain pointer-events-none"
+                      style={{
+                        boxShadow: "0 25px 60px rgba(0,0,0,0.35)",
+                        borderRadius: "4px",
+                      }}
+                    />
+                  </div>
+
+                  {/* Floating bottom controls bar (glassmorphic pill) */}
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-2 rounded-full border shadow-xl backdrop-blur-md bg-white/75 dark:bg-slate-900/70 border-slate-200/50 dark:border-slate-800/40 text-slate-700 dark:text-slate-250 z-20">
+                    <button
+                      onClick={zoomOut}
+                      title="Zoom Out"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </button>
+                    <span className="text-[11px] font-mono font-bold min-w-[40px] text-center">
+                      {Math.round(zoom * 100)}%
+                    </span>
+                    <button
+                      onClick={zoomIn}
+                      title="Zoom In"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </button>
+                    <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+                    <button
+                      onClick={resetZoom}
+                      title="Zoom Fit / Reset"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </button>
+                    <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+                    <button
+                      onClick={rotateCounterClockwise}
+                      title="Rotate Counter-Clockwise"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RotateCw className="h-4 w-4 -scale-x-100" />
+                    </button>
+                    <button
+                      onClick={rotateClockwise}
+                      title="Rotate Clockwise"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <RotateCw className="h-4 w-4" />
+                    </button>
+                    <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+                    <button
+                      onClick={() => setShowGrid(!showGrid)}
+                      title="Toggle Grid Background"
+                      className={`p-1 rounded-lg transition-colors cursor-pointer ${showGrid ? "text-blue-500" : ""}`}
+                    >
+                      <Grid3X3 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Collapsible Info Panel */}
+                {showDetails && (
+                  <div
+                    className="w-64 border-l flex flex-col shrink-0 animate-in slide-in-from-right duration-250"
+                    style={{
+                      background: isDark ? "#0f131a" : "#fafafa",
+                      borderColor: colors.border,
+                    }}
+                  >
+                    <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: colors.border }}>
+                      <span className="text-[12px] font-bold uppercase tracking-wider text-slate-400">File Details</span>
+                      <button
+                        onClick={() => setShowDetails(false)}
+                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-250 cursor-pointer"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="p-4 flex flex-col gap-4 overflow-y-auto text-[12px]">
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Name</div>
+                        <div className="font-semibold break-all text-slate-700 dark:text-slate-300">{file.name}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Dimensions</div>
+                        <div className="font-semibold text-slate-700 dark:text-slate-300">
+                          {dimensions ? `${dimensions.width} × ${dimensions.height} px` : "Loading..."}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">File Size</div>
+                        <div className="font-semibold text-slate-700 dark:text-slate-300">{formatSize(file.size)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Mime Type</div>
+                        <div className="font-mono text-slate-750 dark:text-slate-400">{file.mime}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Path</div>
+                        <div className="font-semibold text-slate-700 dark:text-slate-300 font-mono text-[11px] bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-slate-200/50 dark:border-slate-800/50 inline-block">{file.folderPath}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Uploaded At</div>
+                        <div className="font-semibold text-slate-700 dark:text-slate-300">
+                          {new Date(file.uploadedAt).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {/* VIDEO */}
             {isVideo && contentUrl && (
-              <div className="w-full h-full flex items-center justify-center p-4">
+              <div
+                ref={videoContainerRef}
+                className="w-full h-full flex items-center justify-center p-4 relative bg-black select-none group"
+              >
+                {/* Native Video Element */}
                 <video
+                  ref={videoRef}
                   src={contentUrl}
-                  controls
                   autoPlay
-                  className="max-w-full max-h-full"
-                  style={{ borderRadius: "8px", boxShadow: "0 25px 60px rgba(0,0,0,0.5)" }}
+                  onClick={togglePlayVideo}
+                  onPlay={() => setIsVideoPlaying(true)}
+                  onPause={() => setIsVideoPlaying(false)}
+                  onTimeUpdate={handleVideoTimeUpdate}
+                  onLoadedMetadata={handleVideoLoadedMetadata}
+                  className="max-w-full max-h-full cursor-pointer shadow-2xl rounded-lg"
+                  style={{ maxHeight: "calc(100vh - 120px)" }}
                 />
+
+                {/* Big Centered Play/Pause Overlay Button */}
+                <div
+                  onClick={togglePlayVideo}
+                  className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${
+                    !isVideoPlaying || showVideoControls ? "opacity-100" : "opacity-0"
+                  }`}
+                >
+                  <button className="h-16 w-16 flex items-center justify-center rounded-full bg-black/50 border border-white/20 text-white backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95 transition-all pointer-events-auto duration-200 shadow-lg">
+                    {isVideoPlaying ? (
+                      <Pause className="h-6 w-6 fill-white" />
+                    ) : (
+                      <Play className="h-6 w-6 fill-white ml-1" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Glassmorphic Control Bar */}
+                <div
+                  className={`absolute bottom-6 left-6 right-6 p-4 rounded-2xl flex flex-col gap-2.5 transition-all duration-300 shadow-2xl border border-white/10 backdrop-blur-md bg-black/60 text-white z-20 ${
+                    showVideoControls ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none"
+                  }`}
+                >
+                  {/* Progress Timeline Slider */}
+                  <div className="flex items-center gap-3 w-full">
+                    <span className="text-[10px] font-mono text-white/70 min-w-[35px] text-right">
+                      {formatTime(videoCurrentTime)}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={videoDuration || 100}
+                      step={0.1}
+                      value={videoCurrentTime}
+                      onChange={handleVideoSeek}
+                      className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] font-mono text-white/70 min-w-[35px]">
+                      {formatTime(videoDuration)}
+                    </span>
+                  </div>
+
+                  {/* Buttons & Sliders */}
+                  <div className="flex items-center justify-between">
+                    {/* Left: Play/Pause, Skip Back, Skip Forward, Volume */}
+                    <div className="flex items-center gap-3.5">
+                      <button
+                        onClick={togglePlayVideo}
+                        className="p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer text-white/90 hover:text-white"
+                      >
+                        {isVideoPlaying ? <Pause className="h-4.5 w-4.5" /> : <Play className="h-4.5 w-4.5" />}
+                      </button>
+
+                      <button
+                        onClick={() => skipVideo(-10)}
+                        title="Skip back 10s"
+                        className="p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer text-white/85 hover:text-white"
+                      >
+                        <SkipBack className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        onClick={() => skipVideo(10)}
+                        title="Skip forward 10s"
+                        className="p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer text-white/85 hover:text-white"
+                      >
+                        <SkipForward className="h-4 w-4" />
+                      </button>
+
+                      <div className="h-4 w-px bg-white/10" />
+
+                      {/* Volume controls */}
+                      <div className="flex items-center gap-1.5 group/volume">
+                        <button
+                          onClick={toggleVideoMute}
+                          className="p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer text-white/85 hover:text-white"
+                        >
+                          {isVideoMuted || videoVolume === 0 ? (
+                            <VolumeX className="h-4.5 w-4.5" />
+                          ) : (
+                            <Volume2 className="h-4.5 w-4.5" />
+                          )}
+                        </button>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={isVideoMuted ? 0 : videoVolume}
+                          onChange={handleVideoVolumeChange}
+                          className="w-16 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:accent-blue-500 focus:outline-none transition-all duration-200"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Right: Speed, Fullscreen */}
+                    <div className="flex items-center gap-3 relative">
+                      {/* Playback Speed selector */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                          className="text-[11px] font-mono font-bold px-2 py-1 bg-white/10 hover:bg-white/20 border border-white/5 rounded-lg cursor-pointer transition-colors"
+                        >
+                          {videoSpeed === 1 ? "1.0x" : `${videoSpeed}x`}
+                        </button>
+
+                        {showSpeedMenu && (
+                          <div className="absolute bottom-full right-0 mb-2 py-1.5 w-20 rounded-xl border border-white/10 bg-slate-900/90 backdrop-blur-lg shadow-xl text-white/95 flex flex-col z-35 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                            {[0.5, 1, 1.25, 1.5, 2].map((sp) => (
+                              <button
+                                key={sp}
+                                onClick={() => handleVideoSpeedChange(sp)}
+                                className={`px-3 py-1 text-left text-[11px] font-mono hover:bg-white/10 transition-colors w-full cursor-pointer ${
+                                  videoSpeed === sp ? "text-blue-400 font-bold" : ""
+                                }`}
+                              >
+                                {sp === 1 ? "1.0x" : `${sp}x`}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={handleVideoFullscreen}
+                        className="p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer text-white/85 hover:text-white"
+                      >
+                        {isVideoFullscreen ? <Minimize className="h-4.5 w-4.5" /> : <Maximize className="h-4.5 w-4.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
             {/* AUDIO */}
             {isAudio && contentUrl && (
-              <div className="w-full h-full flex items-center justify-center p-4">
+              <div className="w-full h-full flex items-center justify-center p-6 bg-slate-950/5 animate-in fade-in duration-200">
+                {/* Audio Element */}
+                <audio
+                  ref={audioRef}
+                  src={contentUrl}
+                  autoPlay
+                  onPlay={() => setIsAudioPlaying(true)}
+                  onPause={() => setIsAudioPlaying(false)}
+                  onTimeUpdate={handleAudioTimeUpdate}
+                  onLoadedMetadata={handleAudioLoadedMetadata}
+                />
+
+                {/* Inline Styles for visualizer and rotation animation */}
+                <style>{`
+                  @keyframes audio-spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                  }
+                  @keyframes bounce-bar-1 { 0% { height: 15%; } 100% { height: 75%; } }
+                  @keyframes bounce-bar-2 { 0% { height: 30%; } 100% { height: 95%; } }
+                  @keyframes bounce-bar-3 { 0% { height: 20%; } 100% { height: 60%; } }
+                  @keyframes bounce-bar-4 { 0% { height: 40%; } 100% { height: 85%; } }
+                  @keyframes bounce-bar-5 { 0% { height: 10%; } 100% { height: 100%; } }
+                `}</style>
+
+                {/* Glassmorphic Music Card */}
                 <div
-                  className="flex flex-col items-center gap-6 p-8 rounded-3xl max-w-sm w-full"
-                  style={{
-                    background: isDark ? "#111827" : "#f8fafc",
-                    border: `1px solid ${colors.border}`,
-                    boxShadow: "0 25px 60px rgba(0,0,0,0.2)",
-                  }}
+                  className={`flex flex-col items-center gap-6 p-8 rounded-3xl max-w-sm w-full border backdrop-blur-lg shadow-2xl transition-all duration-350 ${
+                    isDark
+                      ? "bg-slate-900/60 border-slate-800/40 shadow-[0_0_50px_rgba(20,184,166,0.15)]"
+                      : "bg-white/60 border-slate-200/50 shadow-[0_0_40px_rgba(20,184,166,0.1)]"
+                  }`}
                 >
-                  <div
-                    className="h-20 w-20 rounded-full flex items-center justify-center text-teal-500"
-                    style={{
-                      background: isDark ? "#0d1f1d" : "#f0fdf4",
-                      border: `1px solid ${isDark ? "rgba(20,184,166,0.3)" : "rgba(20,184,166,0.4)"}`,
-                    }}
-                  >
-                    <Music className="h-8 w-8" />
+                  {/* Vinyl/CD Disc Layout */}
+                  <div className="relative group select-none">
+                    {/* Outer glowing border */}
+                    <div
+                      className={`h-40 w-40 rounded-full flex items-center justify-center bg-slate-950/95 dark:bg-black/90 relative shadow-2xl transition-transform duration-300 ${
+                        isAudioPlaying ? "scale-105" : "scale-100"
+                      }`}
+                      style={{
+                        backgroundImage: "radial-gradient(circle, #27272a 1px, transparent 1px), radial-gradient(circle, #09090b 70%, transparent 70%)",
+                        backgroundSize: "6px 6px, 100% 100%",
+                        animation: "audio-spin 12s linear infinite",
+                        animationPlayState: isAudioPlaying ? "running" : "paused",
+                        border: "5px solid rgba(255,255,255,0.03)",
+                      }}
+                    >
+                      {/* Vinyl grooves lines (repeated concentric circles) */}
+                      <div className="absolute inset-4 rounded-full border border-white/5" />
+                      <div className="absolute inset-8 rounded-full border border-white/5" />
+                      <div className="absolute inset-12 rounded-full border border-white/5" />
+
+                      {/* Disc Center Label */}
+                      <div
+                        className="h-16 w-16 rounded-full flex items-center justify-center text-teal-400 relative"
+                        style={{
+                          background: "linear-gradient(135deg, #134e4a 0%, #115e59 100%)",
+                          boxShadow: "inset 0 2px 4px rgba(255,255,255,0.2)",
+                        }}
+                      >
+                        <Music className="h-6 w-6 animate-pulse" style={{ animationPlayState: isAudioPlaying ? "running" : "paused" }} />
+                        {/* Spindle hole */}
+                        <div className="absolute h-3 w-3 rounded-full bg-slate-950 dark:bg-black border border-white/10" />
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Equalizer Waveform Bouncing Bars */}
+                  <div className="flex items-end justify-center gap-1.5 h-10 px-4 w-full">
+                    {[1, 2, 3, 4, 5, 4, 3, 2, 1].map((_, i) => {
+                      const animName = `bounce-bar-${(i % 5) + 1}`;
+                      return (
+                        <div
+                          key={i}
+                          className="w-1 bg-teal-500 dark:bg-teal-400 rounded-t-full transition-all duration-300"
+                          style={{
+                            height: isAudioPlaying ? "100%" : "20%",
+                            animation: isAudioPlaying ? `${animName} 0.8s ease-in-out infinite alternate` : "none",
+                            animationDelay: `${i * 0.1}s`,
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Track Info */}
                   <div className="text-center min-w-0 w-full">
                     <p
-                      className="text-sm font-bold truncate"
+                      className="text-[15px] font-bold truncate leading-snug"
                       style={{ color: colors.text }}
                     >
                       {file.name}
                     </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: colors.muted }}>Audio Track</p>
+                    <p className="text-[11px] font-semibold mt-1 flex items-center justify-center gap-1.5" style={{ color: colors.muted }}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-ping" style={{ animationPlayState: isAudioPlaying ? "running" : "paused" }} />
+                      Audio Track
+                    </p>
                   </div>
-                  <audio src={contentUrl} controls autoPlay className="w-full" />
+
+                  {/* Seek Bar & Duration */}
+                  <div className="flex flex-col gap-1.5 w-full">
+                    <input
+                      type="range"
+                      min={0}
+                      max={audioDuration || 100}
+                      step={0.1}
+                      value={audioCurrentTime}
+                      onChange={handleAudioSeek}
+                      className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500 dark:accent-teal-400 focus:outline-none"
+                    />
+                    <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: colors.muted }}>
+                      <span>{formatTime(audioCurrentTime)}</span>
+                      <span>{formatTime(audioDuration)}</span>
+                    </div>
+                  </div>
+
+                  {/* Primary Playback controls */}
+                  <div className="flex items-center justify-center gap-5 w-full">
+                    <button
+                      onClick={() => skipAudio(-10)}
+                      title="Skip back 10s"
+                      className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-xl transition-colors cursor-pointer"
+                      style={{ color: colors.muted }}
+                    >
+                      <SkipBack className="h-5 w-5" />
+                    </button>
+
+                    <button
+                      onClick={togglePlayAudio}
+                      className="h-14 w-14 flex items-center justify-center rounded-full bg-teal-500 hover:bg-teal-400 hover:scale-105 active:scale-95 text-white cursor-pointer shadow-lg transition-all duration-200"
+                    >
+                      {isAudioPlaying ? (
+                        <Pause className="h-5.5 w-5.5 fill-white" />
+                      ) : (
+                        <Play className="h-5.5 w-5.5 fill-white ml-1" />
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => skipAudio(10)}
+                      title="Skip forward 10s"
+                      className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-xl transition-colors cursor-pointer"
+                      style={{ color: colors.muted }}
+                    >
+                      <SkipForward className="h-5 w-5" />
+                    </button>
+                  </div>
+
+                  {/* Secondary controls (Volume + Speed) */}
+                  <div className="flex items-center justify-between w-full mt-2 border-t pt-4" style={{ borderColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)" }}>
+                    {/* Volume */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={toggleAudioMute}
+                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                        style={{ color: colors.muted }}
+                      >
+                        {isAudioMuted || audioVolume === 0 ? (
+                          <VolumeX className="h-4 w-4" />
+                        ) : (
+                          <Volume2 className="h-4 w-4" />
+                        )}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={isAudioMuted ? 0 : audioVolume}
+                        onChange={handleAudioVolumeChange}
+                        className="w-16 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500 dark:accent-teal-400 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Speed dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowAudioSpeedMenu(!showAudioSpeedMenu)}
+                        className="text-[10px] font-mono font-bold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/30 rounded-lg cursor-pointer transition-colors"
+                        style={{ color: colors.text }}
+                      >
+                        {audioSpeed === 1 ? "1.0x" : `${audioSpeed}x`}
+                      </button>
+
+                      {showAudioSpeedMenu && (
+                        <div
+                          className={`absolute bottom-full right-0 mb-2 py-1 w-20 rounded-xl border shadow-xl flex flex-col z-35 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+                            isDark
+                              ? "bg-slate-900 border-slate-800 text-white"
+                              : "bg-white border-slate-200 text-slate-800"
+                          }`}
+                        >
+                          {[0.5, 1, 1.25, 1.5, 2].map((sp) => (
+                            <button
+                              key={sp}
+                              onClick={() => handleAudioSpeedChange(sp)}
+                              className={`px-3 py-1 text-left text-[11px] font-mono hover:bg-slate-100 dark:hover:bg-white/10 transition-colors w-full cursor-pointer ${
+                                audioSpeed === sp
+                                  ? "text-teal-500 font-bold"
+                                  : isDark
+                                  ? "text-slate-400"
+                                  : "text-slate-600"
+                              }`}
+                            >
+                              {sp === 1 ? "1.0x" : `${sp}x`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

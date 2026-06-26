@@ -7,9 +7,61 @@ import { useFileStore } from "../../stores/fileStore";
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function resolveChannelPeer(channelId: string) {
+class Mutex {
+  private promise: Promise<void> = Promise.resolve();
+
+  async acquire(): Promise<() => void> {
+    let release: () => void;
+    const nextPromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const currentPromise = this.promise;
+    this.promise = currentPromise.then(() => nextPromise);
+    await currentPromise;
+    return release!;
+  }
+}
+
+const metadataMutex = new Mutex();
+
+/**
+ * Runs a task exclusively (under the metadata mutex lock) to serialize index updates.
+ */
+export async function runExclusive<T>(task: () => Promise<T>): Promise<T> {
+  const release = await metadataMutex.acquire();
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Helper to wrap any promise in a timeout to prevent indefinite hangs.
+ */
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Timeout of ${timeoutMs}ms exceeded for ${label}`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function resolveChannelInputPeer(channelId: string) {
   const client = getClient();
-  return client.getEntity(channelId);
+  try {
+    // Try local session cache first (fast, non-blocking)
+    return await client.getInputEntity(channelId);
+  } catch (err) {
+    console.warn("[metadataStore] getInputEntity failed, falling back to getEntity with timeout:", err);
+    return withTimeout(client.getEntity(channelId), 5000, "client.getEntity");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -31,7 +83,7 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
   let peer: any;
 
   try {
-    peer = await resolveChannelPeer(channelId);
+    peer = await resolveChannelInputPeer(channelId);
   } catch (err) {
     console.error("[metadataStore] Failed to resolve channel entity:", err);
     throw err;
@@ -61,10 +113,14 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
 
   // --- Step 1: pinned messages ---
   try {
-    const pinned = await client.getMessages(peer, {
-      filter: new Api.InputMessagesFilterPinned(),
-      limit: 100,
-    });
+    const pinned = await withTimeout(
+      client.getMessages(peer, {
+        filter: new Api.InputMessagesFilterPinned(),
+        limit: 100,
+      }),
+      5000,
+      "client.getMessages(pinned)"
+    );
     const hasPinnedIndex = pinned.some((m: any) => m?.text?.includes("teledrive_index"));
     if (hasPinnedIndex) {
       return parseAndDedup(pinned);
@@ -75,7 +131,11 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
 
   // --- Step 2: full scan of recent messages ---
   try {
-    const recent = await client.getMessages(peer, { limit: 200 });
+    const recent = await withTimeout(
+      client.getMessages(peer, { limit: 200 }),
+      5000,
+      "client.getMessages(recent)"
+    );
     return parseAndDedup(recent);
   } catch (scanErr) {
     console.error("[metadataStore] Failed to scan channel messages:", scanErr);
@@ -103,7 +163,7 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
   let peer: any;
 
   try {
-    peer = await resolveChannelPeer(channelId);
+    peer = await resolveChannelInputPeer(channelId);
   } catch (err) {
     console.error("[metadataStore] Failed to resolve channel entity for save:", err);
     throw err;
@@ -114,16 +174,24 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
   let oldIndexMsgIds: number[] = [];
   try {
     // Check pinned messages
-    const pinned = await client.getMessages(peer, {
-      filter: new Api.InputMessagesFilterPinned(),
-      limit: 100,
-    });
+    const pinned = await withTimeout(
+      client.getMessages(peer, {
+        filter: new Api.InputMessagesFilterPinned(),
+        limit: 100,
+      }),
+      5000,
+      "client.getMessages(pinned_save)"
+    );
     const fromPinned = pinned
       .filter((m: any) => m?.text?.includes("teledrive_index"))
       .map((m: any) => m.id);
 
     // Also check recent messages in case some aren't pinned
-    const recent = await client.getMessages(peer, { limit: 200 });
+    const recent = await withTimeout(
+      client.getMessages(peer, { limit: 200 }),
+      5000,
+      "client.getMessages(recent_save)"
+    );
     const fromRecent = recent
       .filter((m: any) => m?.text?.includes("teledrive_index"))
       .map((m: any) => m.id);
@@ -137,17 +205,25 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
   // Unpin and delete all old index messages
   for (const msgId of oldIndexMsgIds) {
     try {
-      await client.invoke(
-        new Api.messages.UpdatePinnedMessage({
-          peer,
-          id: msgId,
-          unpin: true,
-          silent: true,
-        })
+      await withTimeout(
+        client.invoke(
+          new Api.messages.UpdatePinnedMessage({
+            peer,
+            id: msgId,
+            unpin: true,
+            silent: true,
+          })
+        ),
+        3000,
+        "UpdatePinnedMessage(unpin)"
       );
     } catch (_) { /* ignore */ }
     try {
-      await client.deleteMessages(peer, [msgId], { revoke: true });
+      await withTimeout(
+        client.deleteMessages(peer, [msgId], { revoke: true }),
+        3000,
+        "deleteMessages"
+      );
     } catch (_) { /* ignore */ }
   }
 
@@ -171,17 +247,25 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     const text = JSON.stringify(payload);
 
     try {
-      const result = await client.sendMessage(peer, { message: text });
+      const result = await withTimeout(
+        client.sendMessage(peer, { message: text }),
+        5000,
+        "sendMessage(chunk)"
+      );
 
       // Pin best-effort
       try {
-        await client.invoke(
-          new Api.messages.UpdatePinnedMessage({
-            peer,
-            id: result.id,
-            unpin: false,
-            silent: true,
-          })
+        await withTimeout(
+          client.invoke(
+            new Api.messages.UpdatePinnedMessage({
+              peer,
+              id: result.id,
+              unpin: false,
+              silent: true,
+            })
+          ),
+          3000,
+          "UpdatePinnedMessage(pin)"
         );
       } catch (pinErr: any) {
         console.warn(
@@ -203,32 +287,36 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
 
 /** Adds a file entry to the index (replaces if same id already exists). */
 export async function addFile(channelId: string, file: TeleFile): Promise<TeleFile[]> {
-  const files = useFileStore.getState().files;
-  // Replace existing entry with same id, or append
-  const updatedFiles = [...files.filter((f) => f.id !== file.id), file];
-  await saveIndex(channelId, updatedFiles);
-  return updatedFiles;
+  return runExclusive(async () => {
+    const files = useFileStore.getState().files;
+    // Replace existing entry with same id, or append
+    const updatedFiles = [...files.filter((f) => f.id !== file.id), file];
+    await saveIndex(channelId, updatedFiles);
+    return updatedFiles;
+  });
 }
 
 /** Removes a file entry from the index by id. */
 export async function removeFile(channelId: string, fileId: string): Promise<TeleFile[]> {
-  const files = useFileStore.getState().files;
-  const file = files.find((f) => f.id === fileId);
-  const updatedFiles = files.filter((f) => f.id !== fileId);
-  await saveIndex(channelId, updatedFiles);
+  return runExclusive(async () => {
+    const files = useFileStore.getState().files;
+    const file = files.find((f) => f.id === fileId);
+    const updatedFiles = files.filter((f) => f.id !== fileId);
+    await saveIndex(channelId, updatedFiles);
 
-  // Also delete the actual Telegram message if this was a real uploaded file
-  // (folders have messageId=0 and live only in the index)
-  if (file && file.messageId && file.messageId !== 0) {
-    await deleteTelegramMessage(channelId, file.messageId).catch((err) => {
-      console.warn(
-        `[metadataStore] Could not delete Telegram message ${file.messageId} (non-fatal):`,
-        err?.message || err
-      );
-    });
-  }
+    // Also delete the actual Telegram message if this was a real uploaded file
+    // (folders have messageId=0 and live only in the index)
+    if (file && file.messageId && file.messageId !== 0) {
+      await deleteTelegramMessage(channelId, file.messageId).catch((err) => {
+        console.warn(
+          `[metadataStore] Could not delete Telegram message ${file.messageId} (non-fatal):`,
+          err?.message || err
+        );
+      });
+    }
 
-  return updatedFiles;
+    return updatedFiles;
+  });
 }
 
 /**
@@ -242,10 +330,13 @@ export async function deleteTelegramMessage(
 ): Promise<void> {
   if (!messageId || messageId === 0) return;
   const client = getClient();
-  const peer = await resolveChannelPeer(channelId);
-  await client.deleteMessages(peer, [messageId], { revoke: true });
+  const peer = await resolveChannelInputPeer(channelId);
+  await withTimeout(
+    client.deleteMessages(peer, [messageId], { revoke: true }),
+    5000,
+    "deleteMessages"
+  );
 }
-
 
 /**
  * Updates a file entry in the index.
@@ -260,12 +351,14 @@ export async function updateFile(
   fileId: string,
   patch: Partial<TeleFile>
 ): Promise<TeleFile[]> {
-  const files = useFileStore.getState().files;
-  const updatedFiles = files.map((f) =>
-    f.id === fileId ? { ...f, ...patch } : f
-  );
-  await saveIndex(channelId, updatedFiles);
-  return updatedFiles;
+  return runExclusive(async () => {
+    const files = useFileStore.getState().files;
+    const updatedFiles = files.map((f) =>
+      f.id === fileId ? { ...f, ...patch } : f
+    );
+    await saveIndex(channelId, updatedFiles);
+    return updatedFiles;
+  });
 }
 
 /**
