@@ -8,9 +8,11 @@ interface FileState {
   /** O(1) lookup mirror of selectedIds — always kept in sync */
   selectedIdsSet: Set<string>;
   isLoading: boolean;
+  isSyncing: boolean;
   uploadQueue: UploadItem[];
   isOperating: boolean;
   setFiles: (files: TeleFile[]) => void;
+  setSyncing: (isSyncing: boolean) => void;
   setFolder: (path: string) => void;
   toggleSelect: (id: string) => void;
   setSelectedIds: (ids: string[]) => void;
@@ -23,15 +25,34 @@ interface FileState {
   setIsOperating: (isOperating: boolean) => void;
 }
 
+const getInitialFiles = (): TeleFile[] => {
+  try {
+    const cached = localStorage.getItem("teledrive_cached_files");
+    return cached ? JSON.parse(cached) : [];
+  } catch (err) {
+    console.warn("[fileStore] Failed to load cached files from localStorage:", err);
+    return [];
+  }
+};
+
 export const useFileStore = create<FileState>((set) => ({
-  files: [],
+  files: getInitialFiles(),
   currentFolder: "/",
   selectedIds: [],
   selectedIdsSet: new Set<string>(),
   isLoading: false,
+  isSyncing: false,
   uploadQueue: [],
   isOperating: false,
-  setFiles: (files) => set({ files }),
+  setFiles: (files) => {
+    try {
+      localStorage.setItem("teledrive_cached_files", JSON.stringify(files));
+    } catch (err) {
+      console.warn("[fileStore] Failed to cache files to localStorage:", err);
+    }
+    set({ files });
+  },
+  setSyncing: (isSyncing) => set({ isSyncing }),
   setFolder: (currentFolder) =>
     set({ currentFolder, selectedIds: [], selectedIdsSet: new Set() }),
   toggleSelect: (id) =>

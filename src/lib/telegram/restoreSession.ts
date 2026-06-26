@@ -88,8 +88,31 @@ export async function restoreSession(): Promise<boolean> {
     }
   } catch (error: any) {
     const errorStr = `RESTORE_EXC: ${error?.message ?? "no_msg"}\nStack: ${error?.stack ?? "no_stack"}`;
-    await invoke("log_vault_state", { state: errorStr });
-    useAuthStore.getState().logout();
+    await invoke("log_vault_state", { state: errorStr }).catch(() => {});
+    
+    // Check if this error is due to a network connection failure (e.g. offline)
+    const errorMsg = (error?.message || "").toLowerCase();
+    const isNetworkError =
+      errorMsg.includes("timeout") ||
+      errorMsg.includes("network") ||
+      errorMsg.includes("fetch") ||
+      errorMsg.includes("connect") ||
+      errorMsg.includes("disconnect") ||
+      errorMsg.includes("socket") ||
+      errorMsg.includes("dns") ||
+      errorMsg.includes("resolve") ||
+      errorMsg.includes("etimedout") ||
+      errorMsg.includes("enotfound") ||
+      errorMsg.includes("econnrefused") ||
+      errorMsg.includes("handshake");
+
+    if (!isNetworkError) {
+      console.warn("restoreSession: Authentication failure or invalid credentials, clearing session...", error);
+      await invoke("clear_session").catch(() => {});
+      useAuthStore.getState().logout();
+    } else {
+      console.warn("restoreSession: Network connection failure during restoration (offline launch?), keeping session active:", error);
+    }
     return false;
   }
 }

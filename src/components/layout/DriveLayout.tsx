@@ -231,6 +231,7 @@ export default function DriveLayout() {
   const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
 
   const files = useFileStore((state) => state.files);
+  const isSyncing = useFileStore((state) => state.isSyncing);
 
   // Only sum active (non-trashed) file sizes; guard against NaN from BigInt
   const safeSize = (raw: unknown): number => {
@@ -407,7 +408,14 @@ export default function DriveLayout() {
         </div>
 
         {/* Right side items */}
-        <div className="flex items-center gap-1 md:gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
+          {isSyncing && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 text-slate-500 dark:text-slate-400 select-none animate-in fade-in duration-200">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500 shrink-0" />
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wide">Syncing</span>
+            </div>
+          )}
+
           <Button
             variant="ghost"
             size="icon"

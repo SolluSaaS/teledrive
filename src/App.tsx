@@ -69,28 +69,74 @@ import { useTheme } from "./hooks/useTheme";
 function App() {
   useTheme(); // Initialize theme logic
   const [isRestoring, setIsRestoring] = useState(true);
-  const [status, setStatus] = useState("Connecting to Telegram...");
+  const [status] = useState("Connecting to Telegram...");
 
   useEffect(() => {
+    let active = true;
     async function initSession() {
       try {
-        const restored = await restoreSession();
-        if (restored) {
-          // restoreSession sets phoneNumber in the auth store — read it back
+        // Fast local check first:
+        const stored = await invoke<{ session: string | null; phone: string | null }>(
+          "load_session"
+        );
+        const sessionString = stored?.session ?? null;
+        const phoneNumber   = stored?.phone   ?? "";
+
+        if (sessionString && active) {
+          // Pre-authenticate the user immediately so route guards resolve and layouts mount
           const { useAuthStore } = await import("./stores/authStore");
-          const phone = useAuthStore.getState().phoneNumber ?? "";
-          await bootstrapTeleDrive(setStatus, phone);
+          useAuthStore.getState().setSession(sessionString, phoneNumber);
+
+          // If we have cached files, bypass the splash screen instantly!
+          const cached = localStorage.getItem("teledrive_cached_files");
+          let hasCachedFiles = false;
+          if (cached) {
+            try {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                hasCachedFiles = true;
+              }
+            } catch (_) {}
+          }
+
+          if (hasCachedFiles) {
+            setIsRestoring(false);
+          }
+
+          // Trigger Telegram connection and remote sync in the background
+          (async () => {
+            const { useFileStore } = await import("./stores/fileStore");
+            useFileStore.getState().setSyncing(true);
+            try {
+              const restored = await restoreSession();
+              if (restored) {
+                await bootstrapTeleDrive(undefined, phoneNumber);
+              }
+            } catch (err) {
+              console.error("Background session restoration/bootstrap failed:", err);
+            } finally {
+              if (active) {
+                useFileStore.getState().setSyncing(false);
+                setIsRestoring(false); // In case we didn't have cached files and were still in splash loader
+              }
+            }
+          })();
+        } else {
+          // No stored session, go to login page (bypass splash loader)
+          if (active) setIsRestoring(false);
         }
       } catch (err: any) {
         console.error("Failed to restore session on app launch:", err);
         await invoke("log_vault_state", {
           state: `BOOTSTRAP_ERR: ${err?.message || JSON.stringify(err)}\nStack: ${err?.stack || "no_stack"}`
         }).catch(() => {});
-      } finally {
-        setIsRestoring(false);
+        if (active) setIsRestoring(false);
       }
     }
     initSession();
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (isRestoring) {

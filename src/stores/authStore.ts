@@ -20,12 +20,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   setCredentials: (apiId, apiHash) => set({ apiId, apiHash }),
   setSession: (sessionString, phoneNumber) =>
     set({ sessionString, phoneNumber, isAuthenticated: true }),
-  logout: () =>
+  logout: () => {
+    try {
+      localStorage.removeItem("teledrive_cached_files");
+    } catch (err) {
+      console.warn("[authStore] Failed to clear cached files on logout:", err);
+    }
     set({
       sessionString: null,
       phoneNumber: null,
       isAuthenticated: false,
       apiId: null,
       apiHash: null,
-    }),
+    });
+  },
 }));
