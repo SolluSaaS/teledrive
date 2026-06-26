@@ -2,7 +2,8 @@ import { useState, useCallback } from "react";
 import { HardDrive, RefreshCw, Info, Loader2 } from "lucide-react";
 import { useFileStore } from "@/stores/fileStore";
 import { loadIndex } from "@/lib/storage/metadataStore";
-import { getSecret, VAULT_KEY_CHANNEL_ID } from "@/lib/secure/vault";
+import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "@/lib/secure/vault";
+import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -37,6 +38,7 @@ function safeSize(raw: unknown): number {
 export default function StorageSection() {
   const files = useFileStore((state) => state.files);
   const setFiles = useFileStore((state) => state.setFiles);
+  const phoneNumber = useAuthStore((state) => state.phoneNumber);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Only count non-trashed, non-directory items as "files"
@@ -54,7 +56,13 @@ export default function StorageSection() {
   const handleRecalculate = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+      let channelId: string | null = null;
+      if (phoneNumber) {
+        channelId = await getSecret(channelIdKey(phoneNumber));
+      }
+      if (!channelId) {
+        channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+      }
       if (!channelId) {
         toast.error("Storage channel not initialised yet.");
         return;
@@ -68,7 +76,7 @@ export default function StorageSection() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [setFiles]);
+  }, [setFiles, phoneNumber]);
 
   return (
     <div className="space-y-6 max-w-2xl">

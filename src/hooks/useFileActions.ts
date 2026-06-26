@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { getSecret, VAULT_KEY_CHANNEL_ID } from "../lib/secure/vault";
+import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
 import { addFile, removeFile, updateFile, deleteTelegramMessage } from "../lib/storage/metadataStore";
 import { loadIndex, saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
+import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
 import { toast } from "sonner";
 
@@ -10,9 +11,16 @@ export function useFileActions() {
   const [isOperating, setIsOperating] = useState(false);
   const setFiles = useFileStore((state) => state.setFiles);
   const currentFolder = useFileStore((state) => state.currentFolder);
+  const phoneNumber = useAuthStore((state) => state.phoneNumber);
 
   const getChannelId = async () => {
-    const cid = await getSecret(VAULT_KEY_CHANNEL_ID);
+    let cid: string | null = null;
+    if (phoneNumber) {
+      cid = await getSecret(channelIdKey(phoneNumber));
+    }
+    if (!cid) {
+      cid = await getSecret(VAULT_KEY_CHANNEL_ID);
+    }
     if (!cid) {
       toast.error("Telegram storage channel is not initialized");
       throw new Error("Channel ID missing");

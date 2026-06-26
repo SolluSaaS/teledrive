@@ -1,4 +1,4 @@
-import { getSecret, VAULT_KEY_CHANNEL_ID } from "../secure/vault";
+import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../secure/vault";
 
 // ---------------------------------------------------------------------------
 // MIME type inference from file extension
@@ -68,6 +68,7 @@ function getMimeFromExtension(fileName: string): string {
 import { uploadFileToTelegram } from "../telegram/uploader";
 import { addFile } from "../storage/metadataStore";
 import { useFileStore } from "../../stores/fileStore";
+import { useAuthStore } from "../../stores/authStore";
 import { TeleFile, UploadItem } from "../types";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
@@ -102,7 +103,13 @@ export async function processQueue(): Promise<void> {
     await invoke("log_vault_state", { state: "PROCESS_QUEUE: Fetching channelId from vault..." }).catch(() => {});
     let channelId: string | null = null;
     try {
-      channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+      const { phoneNumber } = useAuthStore.getState();
+      if (phoneNumber) {
+        channelId = await getSecret(channelIdKey(phoneNumber));
+      }
+      if (!channelId) {
+        channelId = await getSecret(VAULT_KEY_CHANNEL_ID);
+      }
       await invoke("log_vault_state", { state: `PROCESS_QUEUE: Fetched channelId = ${channelId}` }).catch(() => {});
     } catch (err: any) {
       await invoke("log_vault_state", {
@@ -253,6 +260,9 @@ export async function processQueue(): Promise<void> {
     }
   } catch (error) {
     console.error("Failed inside processQueue:", error);
+    isProcessing = false;
+  } finally {
+    // Safety net: always release the lock even if we missed a path
     isProcessing = false;
   }
 }

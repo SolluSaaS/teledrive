@@ -47,7 +47,9 @@ function CircularProgress({ value }: { value: number }) {
 }
 
 export function UploadProgressPanel() {
-  const { uploadQueue, clearQueue, removeFromQueue } = useFileStore();
+  const uploadQueue = useFileStore((state) => state.uploadQueue);
+  const clearQueue = useFileStore((state) => state.clearQueue);
+  const removeFromQueue = useFileStore((state) => state.removeFromQueue);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 

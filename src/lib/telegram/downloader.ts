@@ -2,7 +2,20 @@ import { getClient } from "./client";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
-import bigInt from "big-integer";
+
+/**
+ * Safely converts any value (number, bigint, or bigInt.BigInteger object) to a standard JS number.
+ */
+function toNumber(val: any): number {
+  if (val == null) return 0;
+  if (typeof val === "number") return val;
+  if (typeof val === "bigint") return Number(val);
+  if (typeof val === "object" && typeof val.toJSNumber === "function") {
+    return val.toJSNumber();
+  }
+  const n = Number(val);
+  return isFinite(n) ? n : 0;
+}
 
 /**
  * Downloads a file from the Telegram channel and saves it to disk using Tauri file dialog.
@@ -16,8 +29,11 @@ export async function downloadFileFromTelegram(
   const client = getClient();
   
   try {
-    // 1. Get the message from the channel
-    const messages = await client.getMessages(channelId, {
+    // 1. Resolve the peer
+    const peer = await client.getEntity(channelId);
+
+    // 2. Get the message from the channel
+    const messages = await client.getMessages(peer, {
       ids: [messageId],
     });
     
@@ -26,7 +42,7 @@ export async function downloadFileFromTelegram(
       throw new Error("Target file message or media not found on Telegram.");
     }
     
-    // 2. Open Tauri save dialog to let user choose target path
+    // 3. Open Tauri save dialog to let user choose target path
     const targetPath = await tauriSaveDialog({
       defaultPath: fileName,
     });
@@ -38,12 +54,12 @@ export async function downloadFileFromTelegram(
     
     toast.info(`Downloading "${fileName}"...`);
     
-    // 3. Download the media buffer from Telegram
+    // 4. Download the media buffer from Telegram
     const buffer = (await client.downloadMedia(message.media, {
-      progressCallback: (downloadedBytes: bigInt.BigInteger, totalBytes: bigInt.BigInteger) => {
-        if (totalBytes.gt(0)) {
-          const downloaded = downloadedBytes.toJSNumber();
-          const total = totalBytes.toJSNumber();
+      progressCallback: (downloadedBytes: any, totalBytes: any) => {
+        const downloaded = toNumber(downloadedBytes);
+        const total = toNumber(totalBytes);
+        if (total > 0) {
           const pct = Math.round((downloaded / total) * 100);
           onProgress?.(pct);
         }
@@ -54,7 +70,7 @@ export async function downloadFileFromTelegram(
       throw new Error("Failed to download media buffer from Telegram.");
     }
     
-    // 4. Save the file to disk
+    // 5. Save the file to disk
     await writeFile(targetPath, buffer);
     toast.success(`"${fileName}" downloaded successfully!`);
   } catch (error: any) {
@@ -76,7 +92,11 @@ export async function downloadFileToBuffer(
   const client = getClient();
   
   try {
-    const messages = await client.getMessages(channelId, {
+    // 1. Resolve the peer
+    const peer = await client.getEntity(channelId);
+
+    // 2. Get the message from the channel
+    const messages = await client.getMessages(peer, {
       ids: [messageId],
     });
     
@@ -86,10 +106,10 @@ export async function downloadFileToBuffer(
     }
     
     const buffer = (await client.downloadMedia(message.media, {
-      progressCallback: (downloadedBytes: bigInt.BigInteger, totalBytes: bigInt.BigInteger) => {
-        if (totalBytes.gt(0)) {
-          const downloaded = downloadedBytes.toJSNumber();
-          const total = totalBytes.toJSNumber();
+      progressCallback: (downloadedBytes: any, totalBytes: any) => {
+        const downloaded = toNumber(downloadedBytes);
+        const total = toNumber(totalBytes);
+        if (total > 0) {
           const pct = Math.round((downloaded / total) * 100);
           onProgress?.(pct);
         }
