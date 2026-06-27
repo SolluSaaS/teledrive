@@ -72,6 +72,7 @@ import { TeleFile, UploadItem } from "../types";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { saveIndexDirect } from "../storage/metadataStore";
+import { getClient } from "../telegram/client";
 
 let isProcessing = false;
 
@@ -134,22 +135,24 @@ export async function processQueue(): Promise<void> {
       state: `PROCESS_QUEUE: Starting ${itemsToStart.length} uploads`
     }).catch(() => {});
 
+    // Immediately set status to uploading to prevent double processing in concurrent processQueue calls
+    for (const item of itemsToStart) {
+      updateQueueItem(item.id, { status: "uploading", progress: 0 });
+    }
+
     isProcessing = false; // Allow other calls to trigger if needed
 
     // Start each upload process asynchronously
     for (const item of itemsToStart) {
-      // Immediately set status to uploading to prevent double processing
-      updateQueueItem(item.id, { status: "uploading", progress: 0 });
-
       // Run the upload task
       (async () => {
         try {
           let fileSource: string | File;
 
-          if (item.file instanceof File) {
-            fileSource = item.file;
-          } else if (item.file && "path" in item.file && item.file.path) {
+          if (item.file && typeof item.file === "object" && "path" in item.file && item.file.path) {
             fileSource = item.file.path;
+          } else if (item.file instanceof File) {
+            fileSource = item.file;
           } else if (item.file && "data" in item.file && item.file.data) {
             // Convert byte array to HTML File object
             fileSource = new File([item.file.data], item.name, { type: (item.file as any).type });
@@ -158,6 +161,15 @@ export async function processQueue(): Promise<void> {
           }
 
           const destinationFolder = item.folderPath || "/";
+
+          // Ensure Telegram client is connected before starting the upload
+          const client = getClient();
+          if (!client.connected) {
+            await invoke("log_vault_state", {
+              state: `UPLOAD_RECONNECT: Client disconnected for item "${item.name}". Reconnecting...`
+            }).catch(() => {});
+            await client.connect();
+          }
 
           // --- Phase 1: Upload file bytes to Telegram ---
           const message = await uploadFileToTelegram(

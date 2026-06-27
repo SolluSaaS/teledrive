@@ -3,6 +3,7 @@ import { getClient } from "./client";
 import { open as tauriOpen, SeekMode } from "@tauri-apps/plugin-fs";
 import bigInt from "big-integer";
 import { Buffer } from "buffer";
+import { withTimeout } from "../storage/metadataStore";
 
 const CHUNK_SIZE = 512 * 1024; // 512KB recommended chunk size for Telegram
 
@@ -66,21 +67,29 @@ export async function uploadFileToTelegram(
       while (!success && retries < 5) {
         try {
           if (isBig) {
-            await client.invoke(
-              new Api.upload.SaveBigFilePart({
-                fileId,
-                filePart: partIndex,
-                fileTotalParts: totalParts,
-                bytes: Buffer.from(chunkBytes),
-              })
+            await withTimeout(
+              client.invoke(
+                new Api.upload.SaveBigFilePart({
+                  fileId,
+                  filePart: partIndex,
+                  fileTotalParts: totalParts,
+                  bytes: Buffer.from(chunkBytes),
+                })
+              ),
+              20000,
+              `SaveBigFilePart(${partIndex}/${totalParts})`
             );
           } else {
-            await client.invoke(
-              new Api.upload.SaveFilePart({
-                fileId,
-                filePart: partIndex,
-                bytes: Buffer.from(chunkBytes),
-              })
+            await withTimeout(
+              client.invoke(
+                new Api.upload.SaveFilePart({
+                  fileId,
+                  filePart: partIndex,
+                  bytes: Buffer.from(chunkBytes),
+                })
+              ),
+              20000,
+              `SaveFilePart(${partIndex}/${totalParts})`
             );
           }
           success = true;
@@ -121,11 +130,15 @@ export async function uploadFileToTelegram(
     
     // Send document to storage channel with folder path JSON metadata caption
     const caption = `teledrive_file:${JSON.stringify({ folder: folderPath })}`;
-    const result = await client.sendFile(channelId, {
-      file: inputFile,
-      forceDocument: true,
-      caption,
-    });
+    const result = await withTimeout(
+      client.sendFile(channelId, {
+        file: inputFile,
+        forceDocument: true,
+        caption,
+      }),
+      30000,
+      "client.sendFile"
+    );
     
     return result;
   } finally {
