@@ -46,6 +46,11 @@ export async function bootstrapTeleDrive(
   // Initialize the local view immediately so the user can enter their drive instantly.
   onStatusChange?.("Initializing local storage view...");
   useFileStore.getState().setFiles(files);
+  // Initial load done — user actions can now persist to Telegram.
+  // Setting this AFTER setFiles ensures any user-triggered action that
+  // arrives during the orphan-scan below (which is still async) will
+  // see bootstrapComplete=true and proceed normally.
+  useFileStore.getState().setBootstrapComplete(true);
 
   // Run the orphan recovery scan asynchronously in the background.
   (async () => {

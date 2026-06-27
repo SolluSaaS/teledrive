@@ -41,8 +41,9 @@ import {
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/downloader";
-import { updateFileLocal, addFile, deleteTelegramMessage } from "@/lib/storage/metadataStore";
+import { updateFileLocal, deleteTelegramMessage } from "@/lib/storage/metadataStore";
 import { uploadFileToTelegram } from "@/lib/telegram/uploader";
+import { enqueueSave } from "@/lib/storage/indexQueue";
 import { readOfflineCache } from "@/lib/storage/offlineStorage";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
@@ -618,19 +619,53 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
     if (!file || isSaving) return;
     setIsSaving(true); setSaveStatus("saving");
 
+    let optimisticFiles: TeleFile[] | null = null;
+    let pushedSnapshot = false;
+
     try {
       const bytes = new TextEncoder().encode(editContent);
       const newFile = new File([bytes], file.name, { type: file.mime });
 
+      // 1) Upload the new bytes to Telegram.
       const message = await uploadFileToTelegram(
         file.channelId, file.name, bytes.length, newFile, file.folderPath ?? "/", () => {}
       );
 
-      try { await deleteTelegramMessage(file.channelId, file.messageId); } catch { /* best-effort */ }
+      const updated: TeleFile = {
+        ...file,
+        messageId: message.id,
+        size: bytes.length,
+        uploadedAt: Date.now(),
+      };
 
-      const updated: TeleFile = { ...file, messageId: message.id, size: bytes.length, uploadedAt: Date.now() };
-      const updatedFiles = await addFile(file.channelId, updated);
-      useFileStore.getState().setFiles(updatedFiles);
+      // 2) Build the optimistic files array (replaces the old entry by id).
+      //    Push a snapshot BEFORE mutating so we can roll back on hard error.
+      optimisticFiles = useFileStore
+        .getState()
+        .files.map((f) => (f.id === file.id ? updated : f));
+      useFileStore.getState().pushSnapshot();
+      pushedSnapshot = true;
+      useFileStore.getState().setFiles(optimisticFiles);
+
+      // 3) Persist through the shared IndexQueue. Transient errors (FLOOD_WAIT,
+      //    timeout, network) are swallowed by the queue and retried — we keep
+      //    the optimistic UI. Hard errors reject; we roll back below.
+      await enqueueSave(file.channelId, optimisticFiles);
+      // Commit succeeded — discard the snapshot.
+      useFileStore.getState().popSnapshot();
+      pushedSnapshot = false;
+
+      // 4) Fire-and-forget delete of the old Telegram message. We do this
+      //    AFTER the index commit so a slow delete doesn't block the UI,
+      //    and a failure here doesn't roll back the index update.
+      if (file.messageId && file.messageId !== message.id) {
+        deleteTelegramMessage(file.channelId, file.messageId).catch((err) => {
+          console.warn(
+            `[FilePreviewModal] Could not delete old message ${file.messageId} for "${file.name}":`,
+            err?.message || err
+          );
+        });
+      }
 
       setTextContent(editContent);
       if (file.name.endsWith(".md")) {
@@ -644,6 +679,18 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       setSaveStatus("saved");
       toast.success(`"${file.name}" saved successfully!`);
     } catch (err: any) {
+      // Hard error path: roll back the optimistic files array.
+      if (pushedSnapshot) {
+        const snap = useFileStore.getState().popSnapshot();
+        if (snap) useFileStore.getState().setFiles(snap);
+        else if (optimisticFiles) {
+          // No snapshot — revert by re-applying the old entry.
+          const rolled = useFileStore
+            .getState()
+            .files.map((f) => (f.id === file.id ? file : f));
+          useFileStore.getState().setFiles(rolled);
+        }
+      }
       setSaveStatus("error");
       toast.error(`Save failed: ${err.message ?? "Unknown error"}`);
     } finally {

@@ -1,14 +1,22 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
-import { updateFile, deleteTelegramMessage, withTimeout } from "../lib/storage/metadataStore";
-import { saveIndex } from "../lib/storage/metadataStore";
+import { deleteTelegramMessage } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
 import { toast } from "sonner";
 import { cacheFileOffline, removeOfflineCache } from "../lib/storage/offlineStorage";
 import { invoke } from "@tauri-apps/api/core";
+import { enqueueSave, flushAllQueues, retryQueue } from "../lib/storage/indexQueue";
+import { useCallback, useMemo } from "react";
 
 
+/**
+ * ActionQueue — serializes offline-toggle operations (which touch local FS)
+ * so a single file can't have two concurrent download/remove flows.
+ *
+ * Index writes are no longer serialized here. The IndexQueue owns all
+ * index persistence and coalesces concurrent actions automatically.
+ */
 class ActionQueue {
   private queue: (() => Promise<any>)[] = [];
   private running = false;
@@ -72,117 +80,115 @@ function isSameOrDescendantPath(path: string, parentPath: string): boolean {
   return normalizedPath === normalizedParentPath || normalizedPath.startsWith(`${normalizedParentPath}/`);
 }
 
-let saveIndexTimeout: any = null;
-let saveIndexPromise: Promise<void> | null = null;
-let pendingChannelId: string | null = null;
-let originalFilesBeforeOptimistic: TeleFile[] | null = null;
-let lastKnownGoodFiles: TeleFile[] | null = null;
-
-function backupFilesForRollback() {
-  if (!originalFilesBeforeOptimistic) {
-    originalFilesBeforeOptimistic = useFileStore.getState().files;
-  }
+/**
+ * Push a snapshot of the current files array onto the rollback ring.
+ * Each call to `applyOptimistic` does this BEFORE mutating, so each action
+ * gets its own independent rollback target (replaces the old global
+ * `originalFilesBeforeOptimistic` which only worked for the first action).
+ */
+function pushSnapshotForRollback(): void {
+  useFileStore.getState().pushSnapshot();
 }
 
-async function performIndexSave(cid: string) {
-  useFileStore.getState().setSyncing(true);
-  let success = false;
-  let lastErr: any = null;
+/**
+ * Pop the most recent rollback snapshot and restore the files array to it.
+ * Called when an action's index save fails with a HARD error.
+ */
+function rollbackToLastSnapshot(): boolean {
+  const snap = useFileStore.getState().popSnapshot();
+  if (!snap) return false;
+  useFileStore.getState().setFiles(snap);
+  return true;
+}
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const filesToSave = useFileStore.getState().files;
-      
-      await invoke("log_vault_state", {
-        state: `SAVE_INDEX_ATTEMPT_${attempt}: saving ${filesToSave.length} files`
-      }).catch(() => {});
+/**
+ * Optimistically apply a new files array and persist it to Telegram.
+ *
+ * - Pushes a rollback snapshot BEFORE the optimistic update so each call
+ *   has its own independent rollback target.
+ * - Routes the persistence through the IndexQueue, which coalesces
+ *   concurrent calls into a single Telegram edit. Transient errors
+ *   (FLOOD_WAIT, timeout) stay optimistic and retry indefinitely; hard
+ *   errors trigger a rollback to the snapshot.
+ */
+async function applyOptimistic(
+  channelId: string,
+  nextFiles: TeleFile[],
+  options: { skipRollbackOnHardError?: boolean } = {}
+): Promise<void> {
+  const store = useFileStore.getState();
 
-      // Run index save (up to 30s timeout per attempt)
-      // Note: No mutex lock is acquired here because saveIndex is globally serialized in metadataStore.ts
-      await withTimeout(saveIndex(cid, filesToSave), 30000, "saveIndex");
-
-      // Update baselines upon successful remote persistence
-      lastKnownGoodFiles = filesToSave;
-      const currentStoreFiles = useFileStore.getState().files;
-      if (currentStoreFiles !== filesToSave) {
-        originalFilesBeforeOptimistic = filesToSave;
-      } else {
-        originalFilesBeforeOptimistic = null;
-      }
-      success = true;
-      
-      await invoke("log_vault_state", { state: "SAVE_INDEX_SUCCESS" }).catch(() => {});
-      break;
-    } catch (err: any) {
-      lastErr = err;
-      console.warn(`[useFileActions] Save attempt ${attempt} failed:`, err);
-      await invoke("log_vault_state", {
-        state: `SAVE_INDEX_ATTEMPT_${attempt}_ERR: ${err?.message || JSON.stringify(err)}`
-      }).catch(() => {});
-      if (attempt < 3) {
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
-      }
-    }
-  }
-
-  if (!success) {
-    console.error("[useFileActions] All save attempts failed. Rolling back.", lastErr);
+  // Suppress writes before bootstrap completes. Bootstrap reads the
+  // authoritative index from Telegram and populates the store; if a user
+  // action fires before that, persisting our optimistic state would
+  // overwrite Telegram with a partial / stale index and lose data on
+  // the next restart. The user can retry the action once bootstrap
+  // completes (which takes < 1s in practice).
+  if (!store.bootstrapComplete) {
     await invoke("log_vault_state", {
-      state: `SAVE_INDEX_FAIL_ALL_ATTEMPTS: ${lastErr?.message || JSON.stringify(lastErr)}`
+      state: `ACTION_SUPPRESSED_PRE_BOOTSTRAP files=${nextFiles.length}`,
     }).catch(() => {});
-
-    const rollbackState = originalFilesBeforeOptimistic || lastKnownGoodFiles;
-    if (rollbackState) {
-      useFileStore.getState().setFiles(rollbackState);
+    // Roll back the optimistic update silently — the action will need
+    // to be re-run after bootstrap. The user typically never sees this
+    // because bootstrap completes before they can interact.
+    if (!options.skipRollbackOnHardError) {
+      rollbackToLastSnapshot();
     }
-    originalFilesBeforeOptimistic = null;
-    toast.error("Failed to save changes to Telegram after multiple attempts.");
+    toast.error("Still loading your drive — please retry in a moment.");
+    throw new Error("Bootstrap not complete");
   }
-  useFileStore.getState().setSyncing(false);
-}
 
-async function flushIndexSave() {
-  if (saveIndexTimeout) {
-    clearTimeout(saveIndexTimeout);
-    saveIndexTimeout = null;
-  }
-  if (pendingChannelId) {
-    const cid = pendingChannelId;
-    saveIndexPromise = performIndexSave(cid);
-    await saveIndexPromise;
-  }
-}
+  pushSnapshotForRollback();
+  store.setFiles(nextFiles);
+  store.setSyncing(true);
 
-function queueIndexSave(channelId: string) {
-  pendingChannelId = channelId;
-  if (saveIndexTimeout) {
-    clearTimeout(saveIndexTimeout);
+  try {
+    await enqueueSave(channelId, nextFiles);
+    // Commit succeeded (or is being transparently retried). Clear this
+    // snapshot from the ring — the optimistic state is now canonical.
+    useFileStore.getState().popSnapshot();
+    await invoke("log_vault_state", {
+      state: `ACTION_OK files=${nextFiles.length}`,
+    }).catch(() => {});
+  } catch (err: any) {
+    if (options.skipRollbackOnHardError) {
+      await invoke("log_vault_state", {
+        state: `ACTION_HARD_ERR_NO_ROLLBACK: ${err?.message ?? err}`,
+      }).catch(() => {});
+      throw err;
+    }
+    // Hard error path: roll back to the pre-action snapshot.
+    const rolled = rollbackToLastSnapshot();
+    await invoke("log_vault_state", {
+      state: `ACTION_HARD_ERR rolled=${rolled}: ${err?.message ?? err}`,
+    }).catch(() => {});
+    toast.error(
+      `Save failed and was rolled back: ${err?.message ?? "Unknown error"}`
+    );
+    throw err;
+  } finally {
+    useFileStore.getState().setSyncing(false);
   }
-  
-  useFileStore.getState().setSyncing(true);
-
-  saveIndexTimeout = setTimeout(() => {
-    saveIndexTimeout = null;
-    const cid = pendingChannelId!;
-    saveIndexPromise = performIndexSave(cid);
-  }, 1000);
 }
 
 if (typeof window !== "undefined") {
+  // Best-effort flush on tab close. The queue resolves any pending entries
+  // so callers don't hang. We don't try to await (browsers can't).
   window.addEventListener("beforeunload", () => {
-    if (pendingChannelId) {
-      void flushIndexSave();
-    }
+    void flushAllQueues();
   });
+
+  // Expose a tiny dev hook so the diagnostics page can force a retry.
+  (window as any).__teledriveRetryIndex = (channelId: string) =>
+    retryQueue(channelId);
 }
 
 export function useFileActions() {
   const isOperating = useFileStore((state) => state.isOperating);
-  const setFiles = useFileStore((state) => state.setFiles);
   const currentFolder = useFileStore((state) => state.currentFolder);
   const phoneNumber = useAuthStore((state) => state.phoneNumber);
 
-  const getChannelId = async () => {
+  const getChannelId = useCallback(async () => {
     let cid: string | null = null;
     if (phoneNumber) {
       cid = await getSecret(channelIdKey(phoneNumber));
@@ -195,9 +201,9 @@ export function useFileActions() {
       throw new Error("Channel ID missing");
     }
     return cid;
-  };
+  }, [phoneNumber]);
 
-  const createFolder = async (name: string) => {
+  const createFolder = useCallback(async (name: string) => {
     if (!name.trim()) return;
     try {
       const channelId = await getChannelId();
@@ -214,18 +220,16 @@ export function useFileActions() {
         trashed: false,
       };
 
-      backupFilesForRollback();
       const files = useFileStore.getState().files;
-      setFiles([...files, newFolder]);
       toast.success(`Folder "${name}" created successfully`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, [...files, newFolder]);
     } catch (err: any) {
       console.error("Failed to create folder:", err);
       toast.error(err.message || "Failed to create folder");
     }
-  };
+  }, [currentFolder, getChannelId]);
 
-  const renameFile = async (fileId: string, newName: string) => {
+  const renameFile = useCallback(async (fileId: string, newName: string) => {
     if (!newName.trim()) return;
     try {
       const channelId = await getChannelId();
@@ -234,17 +238,16 @@ export function useFileActions() {
       if (!fileToRename) throw new Error("File not found");
 
       const isFolder = fileToRename.mime === "inode/directory" || fileToRename.mime === "application/x-directory";
-      backupFilesForRollback();
 
       let oldPath = "";
       let newPath = "";
       if (isFolder) {
-        oldPath = fileToRename.folderPath === "/" 
-          ? `/${fileToRename.name}` 
+        oldPath = fileToRename.folderPath === "/"
+          ? `/${fileToRename.name}`
           : `${fileToRename.folderPath}/${fileToRename.name}`;
-        
-        newPath = fileToRename.folderPath === "/" 
-          ? `/${newName.trim()}` 
+
+        newPath = fileToRename.folderPath === "/"
+          ? `/${newName.trim()}`
           : `${fileToRename.folderPath}/${newName.trim()}`;
       }
 
@@ -263,45 +266,41 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success("Renamed successfully");
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to rename:", err);
       toast.error(err.message || "Failed to rename");
     }
-  };
+  }, [getChannelId]);
 
-  const toggleStar = async (file: TeleFile) => {
+  const toggleStar = useCallback(async (file: TeleFile) => {
     try {
       const channelId = await getChannelId();
       const allFiles = useFileStore.getState().files;
       const currentFile = allFiles.find((f) => f.id === file.id);
       const nextStarred = currentFile ? !currentFile.starred : !file.starred;
 
-      backupFilesForRollback();
       const updatedFiles = allFiles.map((f) =>
         f.id === file.id ? { ...f, starred: nextStarred } : f
       );
 
-      setFiles(updatedFiles);
       toast.success(nextStarred ? "Added to Starred" : "Removed from Starred");
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to toggle star:", err);
       toast.error(err.message || "Failed to update star");
     }
-  };
+  }, [getChannelId]);
 
-  const moveToTrash = async (file: TeleFile) => {
+  const moveToTrash = useCallback(async (file: TeleFile) => {
     try {
       const channelId = await getChannelId();
       const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
       const allFiles = useFileStore.getState().files;
-      backupFilesForRollback();
 
-      const folderPathPrefix = file.folderPath === "/" 
-        ? `/${file.name}` 
+      const folderPathPrefix = file.folderPath === "/"
+        ? `/${file.name}`
         : `${file.folderPath}/${file.name}`;
 
       const updatedFiles = allFiles.map((f) => {
@@ -311,24 +310,22 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Moved "${file.name}" to Trash`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to move to trash:", err);
       toast.error(err.message || "Failed to move to trash");
     }
-  };
+  }, [getChannelId]);
 
-  const restoreFromTrash = async (file: TeleFile) => {
+  const restoreFromTrash = useCallback(async (file: TeleFile) => {
     try {
       const channelId = await getChannelId();
       const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
       const allFiles = useFileStore.getState().files;
-      backupFilesForRollback();
 
-      const folderPathPrefix = file.folderPath === "/" 
-        ? `/${file.name}` 
+      const folderPathPrefix = file.folderPath === "/"
+        ? `/${file.name}`
         : `${file.folderPath}/${file.name}`;
 
       const updatedFiles = allFiles.map((f) => {
@@ -338,24 +335,22 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Restored "${file.name}"`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to restore from trash:", err);
       toast.error(err.message || "Failed to restore");
     }
-  };
+  }, [getChannelId]);
 
-  const archiveFile = async (file: TeleFile) => {
+  const archiveFile = useCallback(async (file: TeleFile) => {
     try {
       const channelId = await getChannelId();
       const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
       const allFiles = useFileStore.getState().files;
-      backupFilesForRollback();
 
-      const folderPathPrefix = file.folderPath === "/" 
-        ? `/${file.name}` 
+      const folderPathPrefix = file.folderPath === "/"
+        ? `/${file.name}`
         : `${file.folderPath}/${file.name}`;
 
       const updatedFiles = allFiles.map((f) => {
@@ -365,24 +360,22 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`"${file.name}" archived`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to archive:", err);
       toast.error(err.message || "Failed to archive");
     }
-  };
+  }, [getChannelId]);
 
-  const unarchiveFile = async (file: TeleFile) => {
+  const unarchiveFile = useCallback(async (file: TeleFile) => {
     try {
       const channelId = await getChannelId();
       const isFolder = file.mime === "inode/directory" || file.mime === "application/x-directory";
       const allFiles = useFileStore.getState().files;
-      backupFilesForRollback();
 
-      const folderPathPrefix = file.folderPath === "/" 
-        ? `/${file.name}` 
+      const folderPathPrefix = file.folderPath === "/"
+        ? `/${file.name}`
         : `${file.folderPath}/${file.name}`;
 
       const updatedFiles = allFiles.map((f) => {
@@ -392,16 +385,15 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`"${file.name}" moved back to My Drive`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to unarchive:", err);
       toast.error(err.message || "Failed to unarchive");
     }
-  };
+  }, [getChannelId]);
 
-  const deletePermanently = async (fileId: string) => {
+  const deletePermanently = useCallback(async (fileId: string) => {
     try {
       const channelId = await getChannelId();
       const allFiles = useFileStore.getState().files;
@@ -409,17 +401,15 @@ export function useFileActions() {
       if (!fileToDelete) throw new Error("File not found");
 
       const isFolder = fileToDelete.mime === "inode/directory" || fileToDelete.mime === "application/x-directory";
-      
-      backupFilesForRollback();
 
       let targets: TeleFile[] = [];
       let active: TeleFile[] = [];
 
       if (isFolder) {
-        const folderPathPrefix = fileToDelete.folderPath === "/" 
-          ? `/${fileToDelete.name}` 
+        const folderPathPrefix = fileToDelete.folderPath === "/"
+          ? `/${fileToDelete.name}`
           : `${fileToDelete.folderPath}/${fileToDelete.name}`;
-        
+
         targets = allFiles.filter((f) => f.id === fileId || f.folderPath === folderPathPrefix || f.folderPath.startsWith(folderPathPrefix + "/"));
         active = allFiles.filter((f) => f.id !== fileId && f.folderPath !== folderPathPrefix && !f.folderPath.startsWith(folderPathPrefix + "/"));
       } else {
@@ -427,11 +417,12 @@ export function useFileActions() {
         active = allFiles.filter((f) => f.id !== fileId);
       }
 
-      setFiles(active);
       toast.success("Deleted permanently");
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, active);
 
-      // Asynchronously delete offline caches and Telegram messages in the background
+      // After the index commits, asynchronously delete offline caches and
+      // Telegram messages in the background. If the index save had failed,
+      // applyOptimistic would have rolled back and we'd never reach here.
       void (async () => {
         try {
           await Promise.allSettled(targets.map((f) => removeOfflineCache(f.id)));
@@ -454,9 +445,9 @@ export function useFileActions() {
       console.error("Failed to delete permanently:", err);
       toast.error(err.message || "Failed to delete");
     }
-  };
+  }, [getChannelId]);
 
-  const emptyTrash = async () => {
+  const emptyTrash = useCallback(async () => {
     try {
       const channelId = await getChannelId();
       const allFiles = useFileStore.getState().files;
@@ -468,17 +459,14 @@ export function useFileActions() {
         return;
       }
 
-      backupFilesForRollback();
-      setFiles(active);
-      
       toast.success(
         trashed.length === 1
           ? "1 item deleted permanently"
           : `${trashed.length} items deleted permanently`
       );
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, active);
 
-      // Asynchronously clear cache & delete telegram messages in background
+      // After the index commits, asynchronously clear cache & delete telegram messages in background
       void (async () => {
         try {
           await Promise.allSettled(trashed.map((f) => removeOfflineCache(f.id)));
@@ -501,21 +489,19 @@ export function useFileActions() {
       console.error("Failed to empty trash:", err);
       toast.error(err.message || "Failed to empty trash");
     }
-  };
+  }, [getChannelId]);
 
-  const moveMultipleToTrash = async (fileIds: string[]) => {
+  const moveMultipleToTrash = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
       const files = useFileStore.getState().files;
       const fileIdSet = new Set(fileIds);
       const targetFiles = files.filter((f) => fileIdSet.has(f.id));
-      
+
       const folderPrefixes = targetFiles
         .filter(isFolder)
         .map(getFolderFullPath);
-
-      backupFilesForRollback();
 
       const updatedFiles = files.map((f) => {
         const isInTarget = fileIdSet.has(f.id);
@@ -528,28 +514,25 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Moved ${fileIds.length} item(s) to Trash`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to move multiple to trash:", err);
       toast.error(err.message || "Failed to move items to trash");
     }
-  };
+  }, [getChannelId]);
 
-  const restoreMultipleFromTrash = async (fileIds: string[]) => {
+  const restoreMultipleFromTrash = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
       const files = useFileStore.getState().files;
       const fileIdSet = new Set(fileIds);
       const targetFiles = files.filter((f) => fileIdSet.has(f.id));
-      
+
       const folderPrefixes = targetFiles
         .filter(isFolder)
         .map(getFolderFullPath);
-
-      backupFilesForRollback();
 
       const updatedFiles = files.map((f) => {
         const isInTarget = fileIdSet.has(f.id);
@@ -562,16 +545,15 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Restored ${fileIds.length} item(s)`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to restore multiple from trash:", err);
       toast.error(err.message || "Failed to restore items");
     }
-  };
+  }, [getChannelId]);
 
-  const deleteMultiplePermanently = async (fileIds: string[]) => {
+  const deleteMultiplePermanently = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
@@ -592,12 +574,10 @@ export function useFileActions() {
       const targets = files.filter(isTargetOrInFolder);
       const active = files.filter((f) => !isTargetOrInFolder(f));
 
-      backupFilesForRollback();
-      setFiles(active);
       toast.success(`Deleted ${fileIds.length} item(s) permanently`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, active);
 
-      // Asynchronously clear cache & delete telegram messages in background
+      // After the index commits, asynchronously clear cache & delete telegram messages in background
       void (async () => {
         try {
           await Promise.allSettled(targets.map((f) => removeOfflineCache(f.id)));
@@ -620,21 +600,19 @@ export function useFileActions() {
       console.error("Failed to delete multiple permanently:", err);
       toast.error(err.message || "Failed to delete items");
     }
-  };
+  }, [getChannelId]);
 
-  const archiveMultiple = async (fileIds: string[]) => {
+  const archiveMultiple = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
       const files = useFileStore.getState().files;
       const fileIdSet = new Set(fileIds);
       const targetFiles = files.filter((f) => fileIdSet.has(f.id));
-      
+
       const folderPrefixes = targetFiles
         .filter(isFolder)
         .map(getFolderFullPath);
-
-      backupFilesForRollback();
 
       const updatedFiles = files.map((f) => {
         const isInTarget = fileIdSet.has(f.id);
@@ -647,16 +625,15 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Archived ${fileIds.length} item(s)`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to archive multiple:", err);
       toast.error(err.message || "Failed to archive items");
     }
-  };
+  }, [getChannelId]);
 
-  const starMultiple = async (fileIds: string[]) => {
+  const starMultiple = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
@@ -667,8 +644,6 @@ export function useFileActions() {
       const folderPrefixes = targetFiles
         .filter(isFolder)
         .map(getFolderFullPath);
-
-      backupFilesForRollback();
 
       const updatedFiles = files.map((f) => {
         const isInTarget = fileIdSet.has(f.id);
@@ -681,28 +656,25 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Starred ${fileIds.length} item(s)`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to star multiple:", err);
       toast.error(err.message || "Failed to star items");
     }
-  };
+  }, [getChannelId]);
 
-  const unarchiveMultiple = async (fileIds: string[]) => {
+  const unarchiveMultiple = useCallback(async (fileIds: string[]) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
       const files = useFileStore.getState().files;
       const fileIdSet = new Set(fileIds);
       const targetFiles = files.filter((f) => fileIdSet.has(f.id));
-      
+
       const folderPrefixes = targetFiles
         .filter(isFolder)
         .map(getFolderFullPath);
-
-      backupFilesForRollback();
 
       const updatedFiles = files.map((f) => {
         const isInTarget = fileIdSet.has(f.id);
@@ -715,16 +687,15 @@ export function useFileActions() {
         return f;
       });
 
-      setFiles(updatedFiles);
       toast.success(`Moved ${fileIds.length} item(s) back to My Drive`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to unarchive multiple:", err);
       toast.error(err.message || "Failed to unarchive items");
     }
-  };
+  }, [getChannelId]);
 
-  const toggleOffline = async (file: TeleFile) => {
+  const toggleOffline = useCallback(async (file: TeleFile) => {
     return fileActionQueue.enqueue(async () => {
       try {
         const channelId = await getChannelId();
@@ -741,16 +712,24 @@ export function useFileActions() {
           toast.success(`"${file.name}" is no longer available offline`);
         }
 
-        const updated = await updateFile(channelId, file.id, { offline: nextOffline });
-        setFiles(updated);
+        // Update the offline flag through the same optimistic + queue path
+        // as every other action. This way a flood-wait on the index write
+        // doesn't block the user, and the toggle stays consistent with the
+        // visible files array.
+        const updatedFiles = useFileStore
+          .getState()
+          .files.map((f) =>
+            f.id === file.id ? { ...f, offline: nextOffline } : f
+          );
+        await applyOptimistic(channelId, updatedFiles);
       } catch (err: any) {
         console.error("Failed to toggle offline availability:", err);
         toast.error(err.message || "Failed to update offline status");
       }
     });
-  };
+  }, [getChannelId]);
 
-  const moveMultipleFilesOrFolders = async (fileIds: string[], targetFolderPath: string) => {
+  const moveMultipleFilesOrFolders = useCallback(async (fileIds: string[], targetFolderPath: string) => {
     if (fileIds.length === 0) return;
     try {
       const channelId = await getChannelId();
@@ -833,17 +812,15 @@ export function useFileActions() {
         return;
       }
 
-      backupFilesForRollback();
-      setFiles(updatedFiles);
       toast.success(`Successfully moved ${fileIds.length} item(s)`);
-      queueIndexSave(channelId);
+      await applyOptimistic(channelId, updatedFiles);
     } catch (err: any) {
       console.error("Failed to move items:", err);
       toast.error(err.message || "Failed to move items");
     }
-  };
+  }, [getChannelId]);
 
-  return {
+  return useMemo(() => ({
     isOperating,
     createFolder,
     renameFile,
@@ -862,5 +839,24 @@ export function useFileActions() {
     unarchiveMultiple,
     toggleOffline,
     moveMultipleFilesOrFolders,
-  };
+  }), [
+    isOperating,
+    createFolder,
+    renameFile,
+    toggleStar,
+    moveToTrash,
+    restoreFromTrash,
+    archiveFile,
+    unarchiveFile,
+    deletePermanently,
+    emptyTrash,
+    moveMultipleToTrash,
+    restoreMultipleFromTrash,
+    deleteMultiplePermanently,
+    starMultiple,
+    archiveMultiple,
+    unarchiveMultiple,
+    toggleOffline,
+    moveMultipleFilesOrFolders,
+  ]);
 }

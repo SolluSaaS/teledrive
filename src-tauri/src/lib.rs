@@ -17,6 +17,27 @@ fn log_vault_state(state: String) {
     }
 }
 
+/// Returns the last N lines of vault_state.log for the diagnostics page.
+/// Reads the same file the frontend writes to via log_vault_state, so the
+/// output mirrors the live state of the index pipeline without requiring
+/// any extra instrumentation on the JS side.
+#[tauri::command]
+fn get_vault_state(lines: Option<usize>) -> Result<String, String> {
+    let limit = lines.unwrap_or(200);
+    let log_path = std::path::Path::new("vault_state.log");
+    if !log_path.exists() {
+        return Ok(String::new());
+    }
+    let contents = std::fs::read_to_string(log_path)
+        .map_err(|e| format!("Failed to read vault_state.log: {}", e))?;
+
+    // Take the last `limit` lines without loading more than needed.
+    let collected: Vec<&str> = contents.lines().rev().take(limit).collect();
+    let mut out: Vec<&str> = collected;
+    out.reverse();
+    Ok(out.join("\n"))
+}
+
 
 
 /// Saves the Telegram session string to a simple JSON file in the app data directory.
@@ -176,6 +197,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             log_vault_state,
+            get_vault_state,
             save_session,
             load_session,
             clear_session,

@@ -2,6 +2,7 @@ import { Api } from "telegram";
 import { getClient } from "../telegram/client";
 import { TeleFile } from "../types";
 import { useFileStore } from "../../stores/fileStore";
+import { enqueueSave } from "./indexQueue";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -166,9 +167,9 @@ async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFi
   const { healedFiles, changed } = reconstructMissingFolders(files, channelId);
   if (changed) {
     console.log(`[metadataStore] Healed missing virtual folders. Saving updated index to Telegram...`);
-    runExclusive(async () => {
-      await saveIndex(channelId, healedFiles);
-    }).catch((err) => {
+    // Use the queue directly — fire and forget, since this is a one-shot
+    // background fixup. Failures are recoverable on next bootstrap.
+    enqueueSave(channelId, healedFiles).catch((err) => {
       console.error("[metadataStore] Failed to save healed index to Telegram:", err);
     });
   }
@@ -189,6 +190,158 @@ async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFi
  * Falls back to scanning the last 200 messages if no pinned index is found
  * (handles the case where the pin was blocked by Telegram's new-channel lock).
  */
+export interface ParsedIndexChunk {
+  msgId: number;
+  chunkIndex: number;
+  totalChunks: number;
+  files: TeleFile[];
+}
+
+/**
+ * Parses a list of Telegram messages into ParsedIndexChunk records.
+ * Filters out non-index messages and malformed chunks.
+ */
+function parseIndexMessages(messages: any[]): ParsedIndexChunk[] {
+  const indexMsgs = messages
+    .filter((m: any) => m?.text?.includes("teledrive_index"))
+    .sort((a: any, b: any) => a.id - b.id);
+  const parsed: ParsedIndexChunk[] = [];
+  for (const msg of indexMsgs) {
+    try {
+      const data = JSON.parse(msg.text || "");
+      if (
+        data &&
+        Array.isArray(data.files) &&
+        typeof data.chunkIndex === "number" &&
+        typeof data.totalChunks === "number" &&
+        data.totalChunks > 0 &&
+        data.chunkIndex >= 0 &&
+        data.chunkIndex < data.totalChunks
+      ) {
+        const files = (data.files as TeleFile[]).filter((f) => f?.id);
+        parsed.push({
+          msgId: Number(msg.id),
+          chunkIndex: data.chunkIndex,
+          totalChunks: data.totalChunks,
+          files,
+        });
+      }
+    } catch (e) {
+      // Skip malformed chunks; they're a normal consequence of partial saves.
+    }
+  }
+  return parsed;
+}
+
+/**
+ * For a single totalChunks group, finds the most-recent COMPLETE save epoch.
+ *
+ * Telegram message ids within a channel are STRICTLY INCREASING, so epoch
+ * boundaries must be detected by chunkIndex repetition: each save emits
+ * chunks 0..N-1, so seeing chunkIndex=K where K <= previously-seen max
+ * means a new save window started.
+ *
+ * Returns the chosen epoch (in chunkIndex-sorted order) or null if no
+ * epoch in this group is complete.
+ */
+export function findMostRecentCoherentEpoch(
+  chunks: ParsedIndexChunk[]
+): ParsedIndexChunk[] | null {
+  if (chunks.length === 0) return null;
+  const sorted = [...chunks].sort((a, b) => a.msgId - b.msgId);
+
+  const epochs: ParsedIndexChunk[][] = [];
+  let current: ParsedIndexChunk[] = [sorted[0]];
+  let maxChunkIdx = sorted[0].chunkIndex;
+  for (let i = 1; i < sorted.length; i++) {
+    const c = sorted[i];
+    if (c.chunkIndex <= maxChunkIdx) {
+      epochs.push(current);
+      current = [c];
+      maxChunkIdx = c.chunkIndex;
+    } else {
+      current.push(c);
+      maxChunkIdx = c.chunkIndex;
+    }
+  }
+  epochs.push(current);
+
+  for (let i = epochs.length - 1; i >= 0; i--) {
+    const epoch = epochs[i];
+    const total = epoch[0]?.totalChunks;
+    if (!total) continue;
+    const present = new Set(epoch.map((c) => c.chunkIndex));
+    let complete = true;
+    for (let k = 0; k < total; k++) {
+      if (!present.has(k)) {
+        complete = false;
+        break;
+      }
+    }
+    if (complete) return [...epoch].sort((a, b) => a.chunkIndex - b.chunkIndex);
+  }
+  return null;
+}
+
+/**
+ * Picks the most-recent fully-coherent set of index chunks from a list of
+ * Telegram messages. Groups by totalChunks, finds the latest complete
+ * epoch in each group, then picks the set with the highest minimum
+ * message id (tie-break by totalChunks for granularity).
+ *
+ * Returns the chosen set's ParsedIndexChunks (sorted by chunkIndex),
+ * or null if no coherent set exists.
+ *
+ * Exported so the IndexQueue's commitOnce can reuse the same selection
+ * logic to identify the current "live" index for edit/delete targets.
+ */
+export function pickCoherentIndexSet(
+  messages: any[]
+): ParsedIndexChunk[] | null {
+  const parsed = parseIndexMessages(messages);
+  if (parsed.length === 0) return null;
+
+  const byTotal = new Map<number, ParsedIndexChunk[]>();
+  for (const p of parsed) {
+    const list = byTotal.get(p.totalChunks);
+    if (list) list.push(p);
+    else byTotal.set(p.totalChunks, [p]);
+  }
+
+  let best: ParsedIndexChunk[] | null = null;
+  let bestMinId = -Infinity;
+  let bestTotal = 0;
+  for (const [, chunks] of byTotal) {
+    const coherent = findMostRecentCoherentEpoch(chunks);
+    if (!coherent) continue;
+    const minId = coherent.reduce(
+      (m, c) => Math.min(m, c.msgId),
+      Infinity
+    );
+    const total = coherent[0]?.totalChunks ?? 0;
+    if (minId > bestMinId || (minId === bestMinId && total > bestTotal)) {
+      best = coherent;
+      bestMinId = minId;
+      bestTotal = total;
+    }
+  }
+  return best;
+}
+
+/**
+ * Loads the virtual file metadata index from the Telegram channel.
+ *
+ * Reads ALL pinned messages that look like teledrive_index entries AND
+ * the last 200 recent messages, then picks the most-recent coherent
+ * chunk-set across both sources. This is robust against:
+ *   - pin failures (FLOOD_WAIT): unpinned-but-sent chunks are still found
+ *     via the recent scan, and their higher message ids make them win
+ *     over any older pinned set.
+ *   - partial saves: an epoch with a missing chunk (e.g. chunk=3 dropped)
+ *     is skipped in favor of the latest COMPLETE epoch.
+ *   - mixed-version channels: Frankenstein-merging across epochs is
+ *     avoided — only fully-coherent sets are considered.
+ */
 export async function loadIndex(channelId: string): Promise<TeleFile[]> {
   const client = getClient();
   let peer: any;
@@ -200,29 +353,9 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
     throw err;
   }
 
-  const parseAndDedup = (messages: any[]): TeleFile[] => {
-    const indexMsgs = messages
-      .filter((m) => m?.text?.includes("teledrive_index"))
-      .sort((a: any, b: any) => a.id - b.id);
-
-    // Merge all chunks into one map, keyed by file.id — last write wins.
-    const byId = new Map<string, TeleFile>();
-    for (const msg of indexMsgs) {
-      try {
-        const data = JSON.parse(msg.text || "");
-        if (data && Array.isArray(data.files)) {
-          for (const f of data.files) {
-            if (f?.id) byId.set(f.id, f);
-          }
-        }
-      } catch (e) {
-        console.warn(`[metadataStore] Failed to parse index msg ${msg.id}:`, e);
-      }
-    }
-    return Array.from(byId.values());
-  };
-
-  // --- Step 1: pinned messages ---
+  // Load from BOTH pinned and recent, then let pickCoherentIndexSet pick
+  // the most-recent coherent set across all sources.
+  let allMsgs: any[] = [];
   try {
     const pinned = await withTimeout(
       client.getMessages(peer, {
@@ -232,274 +365,78 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       5000,
       "client.getMessages(pinned)"
     );
-    const hasPinnedIndex = pinned.some((m: any) => m?.text?.includes("teledrive_index"));
-    if (hasPinnedIndex) {
-      return healAndSave(channelId, parseAndDedup(pinned));
-    }
+    allMsgs = allMsgs.concat(pinned);
   } catch (pinnedErr) {
     console.warn("[metadataStore] Failed to load pinned messages, falling back to scan:", pinnedErr);
   }
 
-  // --- Step 2: full scan of recent messages ---
   try {
     const recent = await withTimeout(
       client.getMessages(peer, { limit: 200 }),
       5000,
       "client.getMessages(recent)"
     );
-    return healAndSave(channelId, parseAndDedup(recent));
+    allMsgs = allMsgs.concat(recent);
   } catch (scanErr) {
-    console.error("[metadataStore] Failed to scan channel messages:", scanErr);
+    console.warn("[metadataStore] Failed to scan channel messages:", scanErr);
+  }
+
+  if (allMsgs.length === 0) {
+    console.error("[metadataStore] No messages loaded from channel");
     return [];
   }
-}
 
-// ---------------------------------------------------------------------------
-// saveIndex — nuclear rewrite strategy: delete all old index msgs, send fresh
-// ---------------------------------------------------------------------------
-
-/**
- * Saves the virtual file metadata index.
- *
- * Strategy: DELETE all existing index messages first, then send fresh ones.
- * This is the only reliable approach when:
- *   - EDIT_MESSAGE_TEMP_RESTRICTED blocks edits
- *   - Previous failed saves left duplicate pinned messages
- *
- * Pinning is best-effort (non-fatal). loadIndex falls back to a scan if
- * the pinned messages aren't available.
- */
-let activeSavePromise: Promise<void> = Promise.resolve();
-
-export async function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
-  // Wait for any previous save to completely finish (success or failure)
-  await activeSavePromise.catch(() => {});
-
-  const savePromise = (async () => {
-    const client = getClient();
-    let peer: any;
-
-    try {
-      peer = await resolveChannelInputPeer(channelId);
-    } catch (err) {
-      console.error("[metadataStore] Failed to resolve channel entity for save:", err);
-      throw err;
-    }
-
-  // CHUNK_SIZE = 15 is safe for Telegram 4096-character limit per message
-  const CHUNK_SIZE = 15;
-  const chunks: TeleFile[][] = [];
-  for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-    chunks.push(files.slice(i, i + CHUNK_SIZE));
-  }
-  if (chunks.length === 0) chunks.push([]);
-
-  // Find existing index messages to edit in-place
-  let existingIndexMsgs: any[] = [];
-  try {
-    const pinned = await withTimeout(
-      client.getMessages(peer, {
-        filter: new Api.InputMessagesFilterPinned(),
-        limit: 100,
-      }),
-      5000,
-      "client.getMessages(pinned_save)"
+  const chosenSet = pickCoherentIndexSet(allMsgs);
+  if (!chosenSet) {
+    console.warn(
+      `[metadataStore] No coherent index set found across ${allMsgs.length} message(s); falling back to best-effort merge.`
     );
-    existingIndexMsgs = pinned
-      .filter((m: any) => m?.text?.includes("teledrive_index"))
-      .sort((a: any, b: any) => a.id - b.id);
-  } catch (err) {
-    console.warn("[metadataStore] Could not load pinned index messages for edit:", err);
+    // Best-effort: dedup by file id across ALL parsed chunks.
+    const allParsed = parseIndexMessages(allMsgs);
+    const byId = new Map<string, TeleFile>();
+    for (const c of allParsed) {
+      for (const f of c.files) byId.set(f.id, f);
+    }
+    return healAndSave(channelId, Array.from(byId.values()));
   }
 
-  if (existingIndexMsgs.length === 0) {
-    try {
-      const recent = await withTimeout(
-        client.getMessages(peer, { limit: 100 }),
-        5000,
-        "client.getMessages(recent_save)"
-      );
-      existingIndexMsgs = recent
-        .filter((m: any) => m?.text?.includes("teledrive_index"))
-        .sort((a: any, b: any) => a.id - b.id);
-    } catch (err) {
-      console.warn("[metadataStore] Could not load recent index messages for edit:", err);
+  // Merge chosen set into a single TeleFile list, deduping by id.
+  const byId = new Map<string, TeleFile>();
+  for (const c of chosenSet) {
+    for (const f of c.files) {
+      byId.set(f.id, f);
     }
   }
+  return healAndSave(channelId, Array.from(byId.values()));
+}
 
-  // Attempt smart in-place editing to avoid creating/pinning/deleting messages
-  let inPlaceSuccess = true;
-  try {
-    const editPromises = chunks.map(async (chunk, i) => {
-      const payload = {
-        teledrive_index: true,
-        version: 1,
-        chunkIndex: i,
-        totalChunks: chunks.length,
-        files: chunk,
-      };
-      const text = JSON.stringify(payload);
+// ---------------------------------------------------------------------------
+// saveIndex — thin wrapper that delegates to the per-channel IndexQueue.
+// ---------------------------------------------------------------------------
+//
+// All Telegram persistence of the index goes through `enqueueSave` which:
+//   - coalesces many enqueues into one Telegram edit (no FLOOD_WAIT cascade)
+//   - serializes per-channel writes (single writer rule)
+//   - waits on FLOOD_WAIT_X and retries automatically
+//   - surfaces queue state to the fileStore for the topbar pill
+//
+// This function is kept as a public API for callers that don't care about
+// the queue mechanics (mostly legacy callers). It simply routes through the
+// queue.
+//
+// Note: the old implementation used a Mutex + `activeSavePromise` chain which
+// double-serialized every save and frequently timed out at 15 s, producing
+// cascading FLOOD_WAIT errors (see src-tauri/vault_state.log). That whole
+// serialization layer has been removed; the queue is the serializer now.
 
-      if (i < existingIndexMsgs.length) {
-        // Edit existing message in-place (no new message/pin created)
-        await withTimeout(
-          client.editMessage(peer, {
-            message: existingIndexMsgs[i].id,
-            text: text,
-          }),
-          8000,
-          `editMessage(chunk ${i})`
-        );
-      } else {
-        // Send new chunk message and pin it
-        const result = await withTimeout(
-          client.sendMessage(peer, { message: text }),
-          8000,
-          `sendMessage(chunk ${i})`
-        );
-        try {
-          await withTimeout(
-            client.invoke(
-              new Api.messages.UpdatePinnedMessage({
-                peer,
-                id: result.id,
-                unpin: false,
-                silent: true,
-              })
-            ),
-            4000,
-            `UpdatePinnedMessage(pin chunk ${i})`
-          );
-        } catch (pinErr: any) {
-          console.warn(
-            `[metadataStore] Could not pin new index chunk ${i} (id=${result.id}):`,
-            pinErr?.message || pinErr
-          );
-        }
-      }
-    });
-
-    await Promise.all(editPromises);
-
-    // Delete any extra old index messages if the new index is smaller
-    if (existingIndexMsgs.length > chunks.length) {
-      const extraMsgIds = existingIndexMsgs.slice(chunks.length).map((m) => m.id);
-      try {
-        await withTimeout(
-          client.deleteMessages(peer, extraMsgIds, { revoke: true }),
-          5000,
-          "deleteMessages(extra chunks)"
-        );
-      } catch (delErr: any) {
-        console.warn("[metadataStore] Failed to delete extra chunks:", delErr?.message || delErr);
-      }
-    }
-  } catch (err: any) {
-    console.warn("[metadataStore] In-place edit failed or rate-limited. Falling back to nuclear rewrite:", err?.message || err);
-    inPlaceSuccess = false;
-  }
-
-  // Fallback to nuclear rewrite if in-place edit failed or timed out
-  if (!inPlaceSuccess) {
-    let oldIndexMsgIds: number[] = [];
-    try {
-      const pinned = await withTimeout(
-        client.getMessages(peer, {
-          filter: new Api.InputMessagesFilterPinned(),
-          limit: 100,
-        }),
-        5000,
-        "client.getMessages(pinned_save)"
-      );
-      const fromPinned = pinned
-        .filter((m: any) => m?.text?.includes("teledrive_index"))
-        .map((m: any) => m.id);
-
-      const recent = await withTimeout(
-        client.getMessages(peer, { limit: 200 }),
-        5000,
-        "client.getMessages(recent_save)"
-      );
-      const fromRecent = recent
-        .filter((m: any) => m?.text?.includes("teledrive_index"))
-        .map((m: any) => m.id);
-
-      oldIndexMsgIds = [...new Set([...fromPinned, ...fromRecent])];
-    } catch (err) {
-      console.warn("[metadataStore] Could not enumerate old index messages for fallback:", err);
-    }
-
-    if (oldIndexMsgIds.length > 0) {
-      try {
-        await withTimeout(
-          client.deleteMessages(peer, oldIndexMsgIds, { revoke: true }),
-          5000,
-          "deleteMessages(batch)"
-        );
-      } catch (err: any) {
-        console.warn(
-          `[metadataStore] Batch delete of old index messages failed (non-fatal):`,
-          err?.message || err
-        );
-      }
-    }
-
-    const sendPromises = chunks.map(async (chunk, i) => {
-      const payload = {
-        teledrive_index: true,
-        version: 1,
-        chunkIndex: i,
-        totalChunks: chunks.length,
-        files: chunk,
-      };
-      const text = JSON.stringify(payload);
-
-      try {
-        const result = await withTimeout(
-          client.sendMessage(peer, { message: text }),
-          8000,
-          `sendMessage(chunk ${i})`
-        );
-
-        try {
-          await withTimeout(
-            client.invoke(
-              new Api.messages.UpdatePinnedMessage({
-                peer,
-                id: result.id,
-                unpin: false,
-                silent: true,
-              })
-            ),
-            4000,
-            `UpdatePinnedMessage(pin chunk ${i})`
-          );
-        } catch (pinErr: any) {
-          console.warn(
-            `[metadataStore] Could not pin index chunk ${i} (id=${result.id}):`,
-            pinErr?.message || pinErr
-          );
-        }
-      } catch (sendErr) {
-        console.error(`[metadataStore] Failed to send index chunk ${i}:`, sendErr);
-        throw sendErr;
-      }
-    });
-
-    await Promise.all(sendPromises);
-    }
-  })();
-
-  activeSavePromise = savePromise;
-  return savePromise;
+export function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
+  return enqueueSave(channelId, files);
 }
 
 /**
- * Saves the index directly WITHOUT acquiring the shared mutex.
- *
- * Use ONLY from `uploadManager` which already controls its own concurrency.
- * Calling this instead of `runExclusive(saveIndex)` prevents upload-manager
- * from blocking (and being blocked by) user-action debounced saves.
+ * Saves the index directly — same as `saveIndex`, kept as a named export
+ * for upload-manager compat. The queue is already the single writer for
+ * the channel, so there's no need to bypass anything.
  */
 export const saveIndexDirect = saveIndex;
 

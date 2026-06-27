@@ -4,8 +4,11 @@ import { open as tauriOpen, SeekMode } from "@tauri-apps/plugin-fs";
 import bigInt from "big-integer";
 import { Buffer } from "buffer";
 import { withTimeout } from "../storage/metadataStore";
+import { withTelegramRetry } from "./rateLimit";
 
 const CHUNK_SIZE = 512 * 1024; // 512KB recommended chunk size for Telegram
+const CHUNK_TIMEOUT_MS = 20_000;
+const SENDFILE_TIMEOUT_MS = 30_000;
 
 interface UploadProgressCallback {
   (uploadedBytes: number, totalBytes: number): void;
@@ -60,52 +63,35 @@ export async function uploadFileToTelegram(
         chunkBytes = new Uint8Array(arrayBuffer);
       }
       
-      // Upload part with retry mechanism
-      let success = false;
-      let retries = 0;
-      
-      while (!success && retries < 5) {
-        try {
-          if (isBig) {
-            await withTimeout(
-              client.invoke(
-                new Api.upload.SaveBigFilePart({
-                  fileId,
-                  filePart: partIndex,
-                  fileTotalParts: totalParts,
-                  bytes: Buffer.from(chunkBytes),
-                })
-              ),
-              20000,
-              `SaveBigFilePart(${partIndex}/${totalParts})`
-            );
-          } else {
-            await withTimeout(
-              client.invoke(
-                new Api.upload.SaveFilePart({
-                  fileId,
-                  filePart: partIndex,
-                  bytes: Buffer.from(chunkBytes),
-                })
-              ),
-              20000,
-              `SaveFilePart(${partIndex}/${totalParts})`
-            );
-          }
-          success = true;
-        } catch (err: any) {
-          retries++;
-          if (err.message && err.message.includes("FLOOD_WAIT")) {
-            const waitSecs = parseInt(err.message.match(/\d+/)?.[0] || "5", 10);
-            console.warn(`Flood wait encountered. Waiting ${waitSecs} seconds...`);
-            await new Promise((r) => setTimeout(r, waitSecs * 1000));
-          } else {
-            console.error(`Error uploading part ${partIndex} (attempt ${retries}):`, err);
-            if (retries >= 5) throw err;
-            await new Promise((r) => setTimeout(r, 1000 * retries)); // Exponential backoff
-          }
-        }
-      }
+      // Upload part through the shared retry helper. The chunk is re-read
+      // from disk on each attempt via the closure — important because the
+      // seek/read may have advanced the handle position mid-failure.
+      await withTelegramRetry(
+        () =>
+          withTimeout(
+            isBig
+              ? client.invoke(
+                  new Api.upload.SaveBigFilePart({
+                    fileId,
+                    filePart: partIndex,
+                    fileTotalParts: totalParts,
+                    bytes: Buffer.from(chunkBytes),
+                  })
+                )
+              : client.invoke(
+                  new Api.upload.SaveFilePart({
+                    fileId,
+                    filePart: partIndex,
+                    bytes: Buffer.from(chunkBytes),
+                  })
+                ),
+            CHUNK_TIMEOUT_MS,
+            `${isBig ? "SaveBigFilePart" : "SaveFilePart"}(${partIndex}/${totalParts})`
+          ),
+        `${isBig ? "SaveBigFilePart" : "SaveFilePart"}(${partIndex}/${totalParts})`,
+        // Cap at 8 attempts per chunk — 8 × 60s worst case before failing.
+        8
+      );
       
       // Update progress
       onProgress?.(end, fileSize);
@@ -128,16 +114,24 @@ export async function uploadFileToTelegram(
       });
     }
     
-    // Send document to storage channel with folder path JSON metadata caption
+    // Send document to storage channel with folder path JSON metadata caption.
+    // Finalize also goes through the retry helper — the file is already fully
+    // uploaded to Telegram at this point, so the only failure modes here are
+    // transient network/rate-limit issues.
     const caption = `teledrive_file:${JSON.stringify({ folder: folderPath })}`;
-    const result = await withTimeout(
-      client.sendFile(channelId, {
-        file: inputFile,
-        forceDocument: true,
-        caption,
-      }),
-      30000,
-      "client.sendFile"
+    const result = await withTelegramRetry(
+      () =>
+        withTimeout(
+          client.sendFile(channelId, {
+            file: inputFile,
+            forceDocument: true,
+            caption,
+          }),
+          SENDFILE_TIMEOUT_MS,
+          "client.sendFile"
+        ),
+      "client.sendFile",
+      5
     );
     
     return result;

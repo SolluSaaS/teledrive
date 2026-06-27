@@ -71,7 +71,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { TeleFile, UploadItem } from "../types";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
-import { saveIndexDirect } from "../storage/metadataStore";
+import { enqueueSave } from "../storage/indexQueue";
 import { getClient } from "../telegram/client";
 
 let isProcessing = false;
@@ -208,15 +208,56 @@ export async function processQueue(): Promise<void> {
             trashed: false,
           };
 
-          // --- Phase 2: Save metadata index to Telegram (Debounced & Batched) ---
+          // --- Phase 2: Save metadata index to Telegram via the shared IndexQueue ---
+          // The optimistic files array already includes newFile (set just below).
+          // Routing through the queue means:
+          //   - 10 concurrent uploads finishing at the same instant coalesce
+          //     into one Telegram edit (latest-write-wins).
+          //   - A user rename in flight at the same time gets merged into the
+          //     same index commit.
+          //   - FLOOD_WAIT backoff is handled identically to user actions,
+          //     so no separate retry loop is needed here.
           const existingFiles = useFileStore.getState().files;
-          setFiles([...existingFiles.filter((f) => f.id !== newFile.id), newFile]);
-          
+          const optimisticFiles = [
+            ...existingFiles.filter((f) => f.id !== newFile.id),
+            newFile,
+          ];
+          setFiles(optimisticFiles);
+
           updateQueueItem(item.id, { status: "done", progress: 100 });
           toast.success(`"${item.name}" uploaded successfully!`);
 
-          pendingIndexFiles.push(newFile);
-          scheduleIndexFlush(channelId);
+          try {
+            await enqueueSave(channelId, optimisticFiles);
+            await invoke("log_vault_state", {
+              state: `UPLOAD_INDEX_OK name=${item.name} files=${optimisticFiles.length}`,
+            }).catch(() => {});
+          } catch (indexErr: any) {
+            // Hard error from the queue (auth lost, channel missing, etc.).
+            // Roll back the optimistic files array for this single upload by
+            // removing the just-added entry; transient errors are swallowed
+            // by the queue and the entry will retry on its own.
+            const isHard =
+              /AUTH_KEY_UNREGISTERED|SESSION_REVOKED|CHANNEL_PRIVATE|PEER_ID_INVALID|CHAT_WRITE_FORBIDDEN|JSON/i.test(
+                indexErr?.message ?? ""
+              );
+            if (isHard) {
+              const rolled = useFileStore
+                .getState()
+                .files.filter((f) => f.id !== newFile.id);
+              useFileStore.getState().setFiles(rolled);
+              await invoke("log_vault_state", {
+                state: `UPLOAD_INDEX_HARD_ERR rolled name=${item.name} err=${indexErr?.message ?? indexErr}`,
+              }).catch(() => {});
+              toast.error(
+                `Index save failed for "${item.name}" — refresh the drive.`
+              );
+            } else {
+              await invoke("log_vault_state", {
+                state: `UPLOAD_INDEX_TRANSIENT_ERR name=${item.name} err=${indexErr?.message ?? indexErr}`,
+              }).catch(() => {});
+            }
+          }
         } catch (err: any) {
           console.error(`Upload error for ${item.name}:`, err);
           await invoke("log_vault_state", {
@@ -242,75 +283,12 @@ export async function processQueue(): Promise<void> {
   }
 }
 
-// ─── Debounced Batch Index Saving ───────────────────────────────────────────
-let pendingIndexFiles: TeleFile[] = [];
-let flushTimeoutId: any = null;
-
-async function flushIndexQueue(channelId: string) {
-  if (pendingIndexFiles.length === 0) return;
-
-  const toSave = [...pendingIndexFiles];
-  pendingIndexFiles = []; // Clear immediately so new completions don't get lost
-
-  await invoke("log_vault_state", {
-    state: `BATCH_INDEX_FLUSH: Flushing ${toSave.length} file(s) directly (no mutex)`
-  }).catch(() => {});
-
-  // Merge new files into current store state by id (last-write-wins)
-  const mergeIntoStore = () => {
-    const existing = useFileStore.getState().files;
-    const byId = new Map<string, TeleFile>();
-    for (const f of existing) byId.set(f.id, f);
-    for (const f of toSave) byId.set(f.id, f);
-    return Array.from(byId.values());
-  };
-
-  let success = false;
-  let lastIndexErr: any = null;
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      // Merge with the freshest store state on every retry
-      const merged = mergeIntoStore();
-      // Save directly — no mutex, upload-manager owns its own sequencing
-      await saveIndexDirect(channelId, merged);
-      useFileStore.getState().setFiles(merged);
-      success = true;
-      break;
-    } catch (indexErr: any) {
-      lastIndexErr = indexErr;
-      await invoke("log_vault_state", {
-        state: `BATCH_INDEX_SAVE_ATTEMPT_${attempt}_ERR: ${indexErr?.message || JSON.stringify(indexErr)}`
-      }).catch(() => {});
-      if (attempt < 3) {
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
-      }
-    }
-  }
-
-  if (!success) {
-    await invoke("log_vault_state", {
-      state: `BATCH_INDEX_SAVE_FAIL: ${toSave.map((f) => f.name).join(", ")} - err=${lastIndexErr?.message || JSON.stringify(lastIndexErr)}`
-    }).catch(() => {});
-    toast.warning("Failed to save file list to the cloud. Try refreshing your drive.");
-  }
-}
-
-function scheduleIndexFlush(channelId: string) {
-  if (flushTimeoutId) {
-    clearTimeout(flushTimeoutId);
-  }
-
-  const { uploadQueue } = useFileStore.getState();
-  const activeUploads = uploadQueue.filter((item) => item.status === "uploading");
-
-  // Flush immediately (300ms) if all uploads finished, else wait 2000ms to batch concurrent uploads
-  const delay = activeUploads.length === 0 ? 300 : 2000;
-
-  flushTimeoutId = setTimeout(() => {
-    flushIndexQueue(channelId);
-  }, delay);
-}
+// ─── Index saving ──────────────────────────────────────────────────────────
+// Index writes from uploads now go through the shared IndexQueue (see
+// enqueueSave above). That queue coalesces concurrent uploads and interleaves
+// them with user-driven actions (rename, star, move, etc.) into a single
+// Telegram edit, so we no longer maintain a separate pendingIndexFiles /
+// flushIndexQueue / scheduleIndexFlush pipeline here.
 
 /**
  * Enqueues a list of files and starts the upload processing queue.
