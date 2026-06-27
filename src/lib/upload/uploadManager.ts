@@ -71,6 +71,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { TeleFile, UploadItem } from "../types";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { saveIndexDirect } from "../storage/metadataStore";
 
 let isProcessing = false;
 
@@ -235,22 +236,33 @@ let flushTimeoutId: any = null;
 
 async function flushIndexQueue(channelId: string) {
   if (pendingIndexFiles.length === 0) return;
-  
+
   const toSave = [...pendingIndexFiles];
-  pendingIndexFiles = []; // Clear queue immediately to handle new completions
-  
+  pendingIndexFiles = []; // Clear immediately so new completions don't get lost
+
   await invoke("log_vault_state", {
-    state: `BATCH_INDEX_FLUSH: Starting flush of ${toSave.length} files to Telegram`
+    state: `BATCH_INDEX_FLUSH: Flushing ${toSave.length} file(s) directly (no mutex)`
   }).catch(() => {});
+
+  // Merge new files into current store state by id (last-write-wins)
+  const mergeIntoStore = () => {
+    const existing = useFileStore.getState().files;
+    const byId = new Map<string, TeleFile>();
+    for (const f of existing) byId.set(f.id, f);
+    for (const f of toSave) byId.set(f.id, f);
+    return Array.from(byId.values());
+  };
 
   let success = false;
   let lastIndexErr: any = null;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const { addFilesBatch } = await import("../storage/metadataStore");
-      const updated = await addFilesBatch(channelId, toSave);
-      useFileStore.getState().setFiles(updated);
+      // Merge with the freshest store state on every retry
+      const merged = mergeIntoStore();
+      // Save directly — no mutex, upload-manager owns its own sequencing
+      await saveIndexDirect(channelId, merged);
+      useFileStore.getState().setFiles(merged);
       success = true;
       break;
     } catch (indexErr: any) {
@@ -259,7 +271,7 @@ async function flushIndexQueue(channelId: string) {
         state: `BATCH_INDEX_SAVE_ATTEMPT_${attempt}_ERR: ${indexErr?.message || JSON.stringify(indexErr)}`
       }).catch(() => {});
       if (attempt < 3) {
-        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
       }
     }
   }

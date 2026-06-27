@@ -20,6 +20,28 @@ class Mutex {
     await currentPromise;
     return release!;
   }
+
+  /**
+   * Tries to acquire the mutex within `timeoutMs` milliseconds.
+   * Throws an error if the lock cannot be acquired in time.
+   */
+  async acquireWithTimeout(timeoutMs: number): Promise<() => void> {
+    let timeoutId: any;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Mutex acquisition timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    const releasePromise = this.acquire();
+    try {
+      const release = await Promise.race([releasePromise, timeoutPromise]);
+      clearTimeout(timeoutId);
+      return release;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
+  }
 }
 
 const metadataMutex = new Mutex();
@@ -29,6 +51,19 @@ const metadataMutex = new Mutex();
  */
 export async function runExclusive<T>(task: () => Promise<T>): Promise<T> {
   const release = await metadataMutex.acquire();
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Runs a task exclusively but gives up if the lock isn't acquired within 15 seconds.
+ * Prevents indefinite deadlocks when two operations compete for the mutex.
+ */
+export async function runExclusiveWithTimeout<T>(task: () => Promise<T>): Promise<T> {
+  const release = await metadataMutex.acquireWithTimeout(15_000);
   try {
     return await task();
   } finally {
@@ -349,6 +384,15 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
 
   await Promise.all(sendPromises);
 }
+
+/**
+ * Saves the index directly WITHOUT acquiring the shared mutex.
+ *
+ * Use ONLY from `uploadManager` which already controls its own concurrency.
+ * Calling this instead of `runExclusive(saveIndex)` prevents upload-manager
+ * from blocking (and being blocked by) user-action debounced saves.
+ */
+export const saveIndexDirect = saveIndex;
 
 // ---------------------------------------------------------------------------
 // Public CRUD helpers — all deduplicate by id before writing

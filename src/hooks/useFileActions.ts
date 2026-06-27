@@ -1,5 +1,5 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
-import { updateFile, deleteTelegramMessage, runExclusive } from "../lib/storage/metadataStore";
+import { updateFile, deleteTelegramMessage, runExclusiveWithTimeout, withTimeout } from "../lib/storage/metadataStore";
 import { saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
@@ -74,11 +74,58 @@ let saveIndexTimeout: any = null;
 let saveIndexPromise: Promise<void> | null = null;
 let pendingChannelId: string | null = null;
 let originalFilesBeforeOptimistic: TeleFile[] | null = null;
+let lastKnownGoodFiles: TeleFile[] | null = null;
 
 function backupFilesForRollback() {
   if (!originalFilesBeforeOptimistic) {
     originalFilesBeforeOptimistic = useFileStore.getState().files;
   }
+}
+
+async function performIndexSave(cid: string) {
+  useFileStore.getState().setSyncing(true);
+  let success = false;
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const filesToSave = useFileStore.getState().files;
+      
+      // Acquire mutex lock (up to 15s timeout to prevent deadlocks)
+      await runExclusiveWithTimeout(async () => {
+        // Run index save (up to 30s timeout per attempt)
+        await withTimeout(saveIndex(cid, filesToSave), 30000, "saveIndex");
+      });
+
+      // Update baselines upon successful remote persistence
+      lastKnownGoodFiles = filesToSave;
+      const currentStoreFiles = useFileStore.getState().files;
+      if (currentStoreFiles !== filesToSave) {
+        originalFilesBeforeOptimistic = filesToSave;
+      } else {
+        originalFilesBeforeOptimistic = null;
+      }
+      success = true;
+      break;
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(`[useFileActions] Save attempt ${attempt} failed:`, err);
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+    }
+  }
+
+  if (!success) {
+    console.error("[useFileActions] All save attempts failed. Rolling back.", lastErr);
+    const rollbackState = originalFilesBeforeOptimistic || lastKnownGoodFiles;
+    if (rollbackState) {
+      useFileStore.getState().setFiles(rollbackState);
+    }
+    originalFilesBeforeOptimistic = null;
+    toast.error("Failed to save changes to Telegram after multiple attempts.");
+  }
+  useFileStore.getState().setSyncing(false);
 }
 
 async function flushIndexSave() {
@@ -88,29 +135,8 @@ async function flushIndexSave() {
   }
   if (pendingChannelId) {
     const cid = pendingChannelId;
-    useFileStore.getState().setSyncing(true);
-    try {
-      await runExclusive(async () => {
-        await saveIndex(cid, useFileStore.getState().files);
-      });
-      originalFilesBeforeOptimistic = null;
-    } catch (err) {
-      console.error("[useFileActions] Immediate index flush failed:", err);
-      if (originalFilesBeforeOptimistic) {
-        useFileStore.getState().setFiles(originalFilesBeforeOptimistic);
-        originalFilesBeforeOptimistic = null;
-      }
-      toast.error("Failed to save changes to Telegram");
-    } finally {
-      useFileStore.getState().setSyncing(false);
-    }
-  }
-  if (saveIndexPromise) {
-    try {
-      await saveIndexPromise;
-    } catch {
-      // ignore
-    }
+    saveIndexPromise = performIndexSave(cid);
+    await saveIndexPromise;
   }
 }
 
@@ -125,23 +151,7 @@ function queueIndexSave(channelId: string) {
   saveIndexTimeout = setTimeout(() => {
     saveIndexTimeout = null;
     const cid = pendingChannelId!;
-    
-    saveIndexPromise = runExclusive(async () => {
-      try {
-        const filesToSave = useFileStore.getState().files;
-        await saveIndex(cid, filesToSave);
-        originalFilesBeforeOptimistic = null;
-      } catch (err) {
-        console.error("[useFileActions] Debounced index save failed:", err);
-        if (originalFilesBeforeOptimistic) {
-          useFileStore.getState().setFiles(originalFilesBeforeOptimistic);
-          originalFilesBeforeOptimistic = null;
-        }
-        toast.error("Failed to save changes to Telegram");
-      } finally {
-        useFileStore.getState().setSyncing(false);
-      }
-    });
+    saveIndexPromise = performIndexSave(cid);
   }, 1000);
 }
 
