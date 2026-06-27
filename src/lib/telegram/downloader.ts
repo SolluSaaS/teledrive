@@ -42,6 +42,11 @@ export async function downloadFileFromTelegram(
   const client = getClient();
   
   try {
+    if (!client.connected) {
+      console.log("[downloader] Client disconnected, reconnecting...");
+      await client.connect();
+    }
+    
     const peer = await resolvePeer(channelId);
     const messages = await client.getMessages(peer, {
       ids: [messageId],
@@ -102,6 +107,11 @@ export async function downloadFileToBuffer(
   const client = getClient();
   
   try {
+    if (!client.connected) {
+      console.log("[downloader] Client disconnected, reconnecting...");
+      await client.connect();
+    }
+    
     const peer = await resolvePeer(channelId);
     const messages = await client.getMessages(peer, {
       ids: [messageId],
