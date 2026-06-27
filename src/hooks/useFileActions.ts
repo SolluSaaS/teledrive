@@ -6,6 +6,8 @@ import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
 import { toast } from "sonner";
 import { cacheFileOffline, removeOfflineCache } from "../lib/storage/offlineStorage";
+import { invoke } from "@tauri-apps/api/core";
+
 
 class ActionQueue {
   private queue: (() => Promise<any>)[] = [];
@@ -91,6 +93,10 @@ async function performIndexSave(cid: string) {
     try {
       const filesToSave = useFileStore.getState().files;
       
+      await invoke("log_vault_state", {
+        state: `SAVE_INDEX_ATTEMPT_${attempt}: saving ${filesToSave.length} files`
+      }).catch(() => {});
+
       // Acquire mutex lock (up to 15s timeout to prevent deadlocks)
       await runExclusiveWithTimeout(async () => {
         // Run index save (up to 30s timeout per attempt)
@@ -106,10 +112,15 @@ async function performIndexSave(cid: string) {
         originalFilesBeforeOptimistic = null;
       }
       success = true;
+      
+      await invoke("log_vault_state", { state: "SAVE_INDEX_SUCCESS" }).catch(() => {});
       break;
     } catch (err: any) {
       lastErr = err;
       console.warn(`[useFileActions] Save attempt ${attempt} failed:`, err);
+      await invoke("log_vault_state", {
+        state: `SAVE_INDEX_ATTEMPT_${attempt}_ERR: ${err?.message || JSON.stringify(err)}`
+      }).catch(() => {});
       if (attempt < 3) {
         await new Promise((r) => setTimeout(r, 2000 * attempt));
       }
@@ -118,6 +129,10 @@ async function performIndexSave(cid: string) {
 
   if (!success) {
     console.error("[useFileActions] All save attempts failed. Rolling back.", lastErr);
+    await invoke("log_vault_state", {
+      state: `SAVE_INDEX_FAIL_ALL_ATTEMPTS: ${lastErr?.message || JSON.stringify(lastErr)}`
+    }).catch(() => {});
+
     const rollbackState = originalFilesBeforeOptimistic || lastKnownGoodFiles;
     if (rollbackState) {
       useFileStore.getState().setFiles(rollbackState);
