@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Smartphone, Eye, HardDrive, Info } from "lucide-react";
+import { ArrowLeft, Smartphone, Eye, HardDrive, Info, CreditCard } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
 import TelegramAccountSection from "@/components/settings/TelegramAccountSection";
+import PlanSection from "@/components/settings/PlanSection";
 import AppearanceSection from "@/components/settings/AppearanceSection";
 import StorageSection from "@/components/settings/StorageSection";
 import AboutSection from "@/components/settings/AboutSection";
 
-type SectionType = "account" | "appearance" | "storage" | "about";
+type SectionType = "account" | "plan" | "appearance" | "storage" | "about";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -26,6 +27,12 @@ export default function SettingsPage() {
       label: "Telegram Account",
       icon: Smartphone,
       component: TelegramAccountSection,
+    },
+    {
+      id: "plan" as const,
+      label: "Plan & Devices",
+      icon: CreditCard,
+      component: PlanSection,
     },
     {
       id: "appearance" as const,
@@ -97,7 +104,22 @@ export default function SettingsPage() {
       const { useAuthStore } = await import("@/stores/authStore");
       const { useFileStore } = await import("@/stores/fileStore");
       useAuthStore.getState().logout();
-      useFileStore.setState({ files: [], selectedIds: [], currentFolder: "/" });
+      // Reset bootstrapComplete too — see TelegramAccountSection.handleDisconnect
+      // for the same fix; without it, the next login's bootstrap gate is
+      // already true and uploads could race the orphan scan.
+      useFileStore.setState({
+        files: [],
+        selectedIds: [],
+        selectedIdsSet: new Set(),
+        currentFolder: "/",
+        bootstrapComplete: false,
+      });
+
+      // Step 5: Wipe backend license session (best-effort).
+      const { useLicenseStore } = await import("@/stores/licenseStore");
+      await useLicenseStore.getState().logoutFromBackend().catch((err) => {
+        console.warn("Backend logout failed (non-fatal):", err);
+      });
     } catch (err) {
       console.error("Logout error:", err);
     } finally {

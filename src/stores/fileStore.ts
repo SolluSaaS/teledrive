@@ -1,7 +1,15 @@
 import { create } from "zustand";
 import { TeleFile, UploadItem } from "../lib/types";
 
-export type IndexQueueState = "idle" | "saving" | "retrying" | "failed";
+export type IndexQueueState =
+  | "idle"
+  | "saving"
+  | "retrying"
+  | "failed"
+  /** Live remote sync is in progress (background poll pulling new messages). */
+  | "syncing-remote"
+  /** A backup snapshot send is currently in flight. */
+  | "backup-running";
 
 interface FileState {
   files: TeleFile[];
@@ -31,6 +39,17 @@ interface FileState {
    * resave and create a third index message set.
    */
   bootstrapComplete: boolean;
+  /**
+   * Highest Telegram message id observed during the most recent index load
+   * (cold start or sync poll). Used by the multi-device sync poller as the
+   * `minId` cursor for `client.getMessages` so we only fetch new messages.
+   * 0 = never observed (sync has not run yet, or no messages exist).
+   */
+  lastIndexMsgId: number;
+  /** Unix ms timestamp of the last successful remote-sync poll (null = never). */
+  lastRemoteSyncAt: number | null;
+  /** Unix ms timestamp of the last completed backup snapshot (null = never). */
+  lastBackupAt: number | null;
   setFiles: (files: TeleFile[]) => void;
   setSyncing: (isSyncing: boolean) => void;
   setFolder: (path: string) => void;
@@ -56,6 +75,16 @@ interface FileState {
   setIndexQueueError: (err: string | null) => void;
   /** Mark initial bootstrap (loadIndex → setFiles) as complete. */
   setBootstrapComplete: (v: boolean) => void;
+  /**
+   * Merge remote deltas (multi-device sync) into the in-memory file list
+   * WITHOUT triggering a Telegram index write. Resolves when the merge
+   * has settled. See implementation for the lazy-import reason.
+   */
+  setRemoteDelta: (remoteFiles: TeleFile[]) => Promise<void>;
+  /** Update the high-water mark for the multi-device sync cursor. */
+  setLastIndexMsgId: (msgId: number) => void;
+  /** Record the timestamp of a backup snapshot. */
+  setLastBackupAt: (ms: number) => void;
 }
 
 const getInitialFiles = (): TeleFile[] => {
@@ -85,6 +114,9 @@ export const useFileStore = create<FileState>((set, get) => ({
   indexQueueRetryInSec: 0,
   indexQueueError: null,
   bootstrapComplete: false,
+  lastIndexMsgId: 0,
+  lastRemoteSyncAt: null,
+  lastBackupAt: null,
   setFiles: (files) => {
     try {
       localStorage.setItem("teledrive_cached_files", JSON.stringify(files));
@@ -146,4 +178,38 @@ export const useFileStore = create<FileState>((set, get) => ({
     set({ indexQueueRetryInSec }),
   setIndexQueueError: (indexQueueError) => set({ indexQueueError }),
   setBootstrapComplete: (bootstrapComplete) => set({ bootstrapComplete }),
+  /**
+   * Merge new files arriving from another device's sync poll (or any other
+   * read-only delta source) into the in-memory file list WITHOUT triggering
+   * a Telegram index write. Lazy-imports dedupeByMessageId to avoid the
+   * circular module dependency on metadataStore.
+   *
+   * Idempotent: if no new ids arrive, this is a no-op (we don't even touch
+   * the `files` array reference, so React subscribers don't re-render).
+   *
+   * Returns a Promise so the caller can await the merge (useful for the
+   * sync orchestrator that wants to know when the store settled). The
+   * implementation is still synchronous after the dynamic import resolves,
+   * so callers don't need to handle any queueing.
+   */
+  setRemoteDelta: async (remoteFiles: TeleFile[]) => {
+    if (remoteFiles.length === 0) return;
+    const { dedupeByMessageId } = await import("../lib/storage/metadataStore");
+    set((state) => {
+      const merged = dedupeByMessageId([...state.files, ...remoteFiles]);
+      // Cheap O(n) early-out: same sorted id set ⇒ nothing actually changed.
+      if (merged.length === state.files.length) return state;
+      try {
+        localStorage.setItem("teledrive_cached_files", JSON.stringify(merged));
+      } catch (err) {
+        console.warn("[fileStore] Failed to cache files to localStorage:", err);
+      }
+      return {
+        files: merged,
+        lastRemoteSyncAt: Date.now(),
+      };
+    });
+  },
+  setLastIndexMsgId: (msgId) => set({ lastIndexMsgId: msgId }),
+  setLastBackupAt: (ms) => set({ lastBackupAt: ms }),
 }));

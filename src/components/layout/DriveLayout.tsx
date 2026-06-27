@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive, AlertTriangle, RefreshCw } from "lucide-react";
+import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive, AlertTriangle, RefreshCw, Cloud, Shield } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
@@ -574,31 +574,45 @@ export default function DriveLayout() {
         {/* Right side items */}
         <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
           {/* Index queue state pill.
-              Three visible states:
+              Visible states:
               - failed: amber/red pill with a "Retry" button (uses window.__teledriveRetryIndex)
               - retrying: spinner + "Retrying in Xs"
               - saving (or isSyncing): spinner + "Syncing" (legacy behavior preserved)
+              - syncing-remote: subtle spinner + "Synced from other device" (Pro live sync)
+              - backup-running: subtle spinner + "Backup in progress"
               Hidden when idle and no optimistic op is in flight. */}
           {(indexQueueState === "failed" ||
             indexQueueState === "retrying" ||
-            (isSyncing && indexQueueState === "saving")) && (
+            (isSyncing && indexQueueState === "saving") ||
+            indexQueueState === "syncing-remote" ||
+            indexQueueState === "backup-running") && (
             <div
               title={
                 indexQueueState === "failed"
                   ? indexQueueError ?? "Index save failed — click to retry"
                   : indexQueueState === "retrying" && indexQueueError
                   ? indexQueueError
+                  : indexQueueState === "syncing-remote"
+                  ? "Live multi-device sync"
+                  : indexQueueState === "backup-running"
+                  ? "Backup snapshot in progress"
                   : undefined
               }
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border",
                 indexQueueState === "failed"
                   ? "bg-amber-50/90 dark:bg-amber-950/40 border-amber-300/60 dark:border-amber-700/50 text-amber-700 dark:text-amber-300"
+                  : indexQueueState === "syncing-remote" || indexQueueState === "backup-running"
+                  ? "bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300/60 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300"
                   : "bg-slate-100/80 dark:bg-slate-900/60 border-slate-200/50 dark:border-slate-800/50 text-slate-500 dark:text-slate-400"
               )}
             >
               {indexQueueState === "failed" ? (
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              ) : indexQueueState === "syncing-remote" ? (
+                <Cloud className="h-3.5 w-3.5 shrink-0" />
+              ) : indexQueueState === "backup-running" ? (
+                <Shield className="h-3.5 w-3.5 shrink-0" />
               ) : (
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500 shrink-0" />
               )}
@@ -607,6 +621,10 @@ export default function DriveLayout() {
                   ? "Save failed"
                   : indexQueueState === "retrying" && indexQueueRetryInSec > 0
                   ? `Retrying in ${indexQueueRetryInSec}s`
+                  : indexQueueState === "syncing-remote"
+                  ? "Synced from other device"
+                  : indexQueueState === "backup-running"
+                  ? "Backup in progress"
                   : "Syncing"}
               </span>
               {indexQueueState === "failed" && (

@@ -8,6 +8,133 @@ import { enqueueSave } from "./indexQueue";
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Deterministic folder id from a full virtual path.
+ *
+ * Same path → same id, every cold start. Replaces the old `healed_<random>`
+ * scheme that produced duplicate folder entries on every bootstrap (Bug 1 in
+ * the plan). Folders created via `createFolder` keep their original random id
+ * for backwards compatibility — the dedupe pass on recovery collapses them
+ * to the canonical `folder_<hash>` only if duplicates exist.
+ *
+ * Slashes, dots, and unicode are preserved in the base64 — the id is an
+ * opaque internal token, never shown to users. Length cap protects against
+ * pathological paths.
+ */
+export function folderIdForPath(fullPath: string): string {
+  const normalized = fullPath === "/" ? "/" : fullPath.replace(/\/+$/, "");
+  // btoa is available in WebView; full Unicode → percent-encode first.
+  const encoded = btoa(
+    encodeURIComponent(normalized).replace(/%([0-9A-F]{2})/g, (_, h) =>
+      String.fromCharCode(parseInt(h, 16))
+    )
+  );
+  return `folder_${encoded.slice(0, 48)}`;
+}
+
+/**
+ * Deduplicates a file list by messageId. Folders (messageId === 0) are kept
+ * as-is — they have no Telegram message to anchor to, and multiple folder
+ * entries for the same path are collapsed by `collapseDuplicateFolders`
+ * below.
+ *
+ * Tie-break for files with identical uploadedAt: prefer the one whose name
+ * is NOT a `recovered_*` placeholder, since user-renamed entries reflect
+ * current intent better than orphan-recovered ones.
+ */
+export function dedupeByMessageId(files: TeleFile[]): TeleFile[] {
+  const byMsgId = new Map<number, TeleFile>();
+  const folders: TeleFile[] = [];
+  for (const f of files) {
+    if (!f.messageId || f.messageId === 0) {
+      folders.push(f);
+      continue;
+    }
+    const existing = byMsgId.get(f.messageId);
+    if (!existing) {
+      byMsgId.set(f.messageId, f);
+      continue;
+    }
+    // Prefer the entry with the larger uploadedAt (last write wins).
+    // If equal, prefer the non-recovered id (user-renamed > orphan-recovered).
+    const newer =
+      f.uploadedAt > existing.uploadedAt
+        ? f
+        : f.uploadedAt < existing.uploadedAt
+        ? existing
+        : existing.id.startsWith("recovered_") && !f.id.startsWith("recovered_")
+        ? f
+        : existing;
+    byMsgId.set(f.messageId, newer);
+  }
+  return [...folders, ...byMsgId.values()];
+}
+
+/**
+ * Collapses duplicate folder entries to a single canonical entry per full
+ * path. Keeps the existing entry with the LOWEST id (deterministic across
+ * cold starts — id sort is stable for ties, and `healed_*` / `folder_*` /
+ * random ids all sort as strings).
+ *
+ * Why not always prefer the path-derived `folderIdForPath`? Because that
+ * would rewrite every existing folder entry's id, which would break
+ * `selectedIds` references in the user's current selection state. Keeping
+ * the lowest existing id avoids that churn.
+ */
+export function collapseDuplicateFolders(files: TeleFile[]): TeleFile[] {
+  const byPath = new Map<string, TeleFile>();
+  const nonFolders: TeleFile[] = [];
+  for (const f of files) {
+    if (!isFolderMime(f.mime)) {
+      nonFolders.push(f);
+      continue;
+    }
+    const fullPath = getFolderFullPath(f);
+    const existing = byPath.get(fullPath);
+    if (!existing) {
+      byPath.set(fullPath, f);
+      continue;
+    }
+    // Keep the lower-id entry so the result is deterministic.
+    const keeper = f.id < existing.id ? f : existing;
+    byPath.set(fullPath, keeper);
+  }
+  return [...byPath.values(), ...nonFolders];
+}
+
+function isFolderMime(mime: string | undefined): boolean {
+  return mime === "inode/directory" || mime === "application/x-directory";
+}
+
+function getFolderFullPath(f: TeleFile): string {
+  const parent = !f.folderPath || f.folderPath === "/" ? "" : f.folderPath.replace(/\/+$/, "");
+  return `${parent}/${f.name}`;
+}
+
+/**
+ * Returns the full path of a folder entry (`/<parent>/<name>` or `/<name>`).
+ * Exported so move/rename in useFileActions can match folder entries by
+ * path rather than by id — that way duplicate folder entries (same path,
+ * different ids) all get updated consistently.
+ */
+export function fullPathForFolder(folder: TeleFile): string {
+  return getFolderFullPath(folder);
+}
+
+/**
+ * Returns every folder entry whose full path matches `fullPath`. With the
+ * pre-fix code, duplicates meant a move/rename would update ONE entry and
+ * leave the others behind; with this helper, callers can update all of them.
+ */
+export function findFoldersByPath(files: TeleFile[], fullPath: string): TeleFile[] {
+  const out: TeleFile[] = [];
+  for (const f of files) {
+    if (!isFolderMime(f.mime)) continue;
+    if (getFolderFullPath(f) === fullPath) out.push(f);
+  }
+  return out;
+}
+
 class Mutex {
   private promise: Promise<void> = Promise.resolve();
 
@@ -89,7 +216,7 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, lab
   }
 }
 
-async function resolveChannelInputPeer(channelId: string) {
+export async function resolveChannelInputPeer(channelId: string) {
   const client = getClient();
   try {
     // Try local session cache first (fast, non-blocking)
@@ -136,7 +263,10 @@ export function reconstructMissingFolders(
 
       if (!existingFolderPaths.has(folderFullPath)) {
         const newFolder: TeleFile = {
-          id: `healed_${Math.random().toString(36).substring(2, 11)}`,
+          // Stable id derived from the full path. Two cold starts computing
+          // this folder will agree on the same id, so the deduplication pass
+          // on recovery doesn't see two different ids for the same folder.
+          id: folderIdForPath(folderFullPath),
           name,
           size: 0,
           mime: "inode/directory",
@@ -164,16 +294,25 @@ export function reconstructMissingFolders(
 }
 
 async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFile[]> {
+  // Reconstruct first (so folder entries exist for any folderPath references),
+  // THEN dedupe. Order matters: reconstructMissingFolders creates folder
+  // entries with deterministic ids, and dedupeByMessageId / collapseDuplicateFolders
+  // would otherwise drop folder duplicates that have the same id but different
+  // random metadata. Doing it this way means duplicate folders from previous
+  // cold starts collapse to one canonical entry before they hit the queue.
   const { healedFiles, changed } = reconstructMissingFolders(files, channelId);
-  if (changed) {
-    console.log(`[metadataStore] Healed missing virtual folders. Saving updated index to Telegram...`);
-    // Use the queue directly — fire and forget, since this is a one-shot
-    // background fixup. Failures are recoverable on next bootstrap.
-    enqueueSave(channelId, healedFiles).catch((err) => {
+  const cleaned = collapseDuplicateFolders(dedupeByMessageId(healedFiles));
+  if (changed || cleaned.length !== files.length) {
+    console.log(
+      `[metadataStore] Healed ${changed ? "folders" : ""}${changed && cleaned.length !== files.length ? " + " : ""}${
+        cleaned.length !== files.length ? `dedup removed ${files.length - cleaned.length}` : ""
+      }. Saving updated index to Telegram...`
+    );
+    enqueueSave(channelId, cleaned).catch((err) => {
       console.error("[metadataStore] Failed to save healed index to Telegram:", err);
     });
   }
-  return healedFiles;
+  return cleaned;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +536,7 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
     for (const c of allParsed) {
       for (const f of c.files) byId.set(f.id, f);
     }
-    return healAndSave(channelId, Array.from(byId.values()));
+    return healAndSave(channelId, collapseDuplicateFolders(dedupeByMessageId(Array.from(byId.values()))));
   }
 
   // Merge chosen set into a single TeleFile list, deduping by id.
@@ -407,7 +546,101 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       byId.set(f.id, f);
     }
   }
-  return healAndSave(channelId, Array.from(byId.values()));
+  return healAndSave(channelId, collapseDuplicateFolders(dedupeByMessageId(Array.from(byId.values()))));
+}
+
+// ---------------------------------------------------------------------------
+// loadIndexIncremental — used by the multi-device sync poller.
+// ---------------------------------------------------------------------------
+//
+// Fetches only messages newer than `sinceMsgId` (exclusive), parses any
+// index chunks in that slice, and returns the merged TeleFile delta
+// (deduplicated by messageId via dedupeByMessageId). Does NOT trigger
+// `healAndSave` — the caller (RemoteSyncOrchestrator) merges the delta
+// into the in-memory store via setRemoteDelta, which is read-only.
+//
+// Returns { files, highestMsgId } so the caller can update its
+// high-water mark for the next poll. When `sinceMsgId` is 0 (e.g. first
+// sync poll after bootstrap), this is equivalent to a recent-messages
+// scan; the caller should only invoke it after the bootstrap has set
+// lastIndexMsgId to a non-zero value.
+//
+// Cost: 1x getMessages(peer, { minId }) per poll = 5s timeout. At the
+// default 30s poll cadence that's well under Telegram's FLOOD_WAIT
+// thresholds for history reads.
+
+export interface IncrementalIndexResult {
+  /** New or updated files found in messages after `sinceMsgId`. May be empty. */
+  files: TeleFile[];
+  /** Highest message id observed in the fetched slice. 0 if nothing was fetched. */
+  highestMsgId: number;
+}
+
+/**
+ * Pull new index chunks from Telegram since the last known high-water mark.
+ *
+ * On Telegram GramJS, `minId: sinceMsgId` returns messages with id STRICTLY
+ * GREATER than sinceMsgId (the docs say "lower (older) ID or equal" is
+ * excluded). We verify the cutoff in code as a defensive guard against any
+ * future change in semantics.
+ */
+export async function loadIndexIncremental(
+  channelId: string,
+  sinceMsgId: number
+): Promise<IncrementalIndexResult> {
+  const client = getClient();
+  let peer: any;
+  try {
+    peer = await resolveChannelInputPeer(channelId);
+  } catch (err) {
+    console.warn("[metadataStore] loadIndexIncremental: resolve failed:", err);
+    return { files: [], highestMsgId: sinceMsgId };
+  }
+
+  let msgs: any[] = [];
+  try {
+    msgs = await withTimeout(
+      client.getMessages(peer, {
+        minId: sinceMsgId,
+        limit: 200,
+      }),
+      5000,
+      "client.getMessages(minId)"
+    );
+  } catch (err) {
+    console.warn("[metadataStore] loadIndexIncremental: getMessages failed:", err);
+    return { files: [], highestMsgId: sinceMsgId };
+  }
+
+  // Defensive filter in case GramJS ever ships a semantics change.
+  const fresh = msgs.filter((m: any) => typeof m?.id === "number" && m.id > sinceMsgId);
+
+  if (fresh.length === 0) {
+    return { files: [], highestMsgId: sinceMsgId };
+  }
+
+  // Track the high-water mark across this slice.
+  const highestMsgId = fresh.reduce((m: number, x: any) => Math.max(m, x.id), sinceMsgId);
+
+  const chosenSet = pickCoherentIndexSet(fresh);
+  if (!chosenSet) {
+    // No coherent epoch in the new slice — could be a partial save. The
+    // caller will re-poll; we don't try to reconstruct. Returning an empty
+    // file list keeps the caller out of any partial-state territory.
+    return { files: [], highestMsgId };
+  }
+
+  const byId = new Map<string, TeleFile>();
+  for (const c of chosenSet) {
+    for (const f of c.files) byId.set(f.id, f);
+  }
+  // Dedupe by messageId so any overlapping entries across the slice collapse.
+  // We do NOT collapse folders here (folders have messageId=0) — folder
+  // uniqueness is enforced at the bootstrap / healAndSave layer.
+  return {
+    files: dedupeByMessageId(Array.from(byId.values())),
+    highestMsgId,
+  };
 }
 
 // ---------------------------------------------------------------------------

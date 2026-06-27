@@ -18,6 +18,7 @@ const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const RemoteSyncOrchestrator = lazy(() => import("./components/RemoteSyncOrchestrator"));
 
 // Full-screen spinner fallback
 function LoadingFallback() {
@@ -106,6 +107,13 @@ function App() {
           (async () => {
             const { useFileStore } = await import("./stores/fileStore");
             useFileStore.getState().setSyncing(true);
+            // In parallel, re-verify the backend license session (fire-and-forget).
+            // If a JWT is in Stronghold, this populates plan/license/devices.
+            // If the backend is unreachable or the JWT expired, the store
+            // degrades gracefully (toast warning, cached state preserved).
+            void import("./stores/licenseStore")
+              .then(({ useLicenseStore }) => useLicenseStore.getState().verifyBackendSession())
+              .catch((err) => console.warn("Backend verify on boot failed:", err));
             try {
               const restored = await restoreSession();
               if (restored) {
@@ -191,6 +199,13 @@ function App() {
           {/* Catch-all */}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+      </Suspense>
+      {/* Pro feature: live multi-device sync coordinator. Headless component
+          that runs only while authenticated + bootstrapped. Suspended with
+          the same fallback as other lazy chunks — but since it renders null,
+          the fallback never appears. */}
+      <Suspense fallback={null}>
+        <RemoteSyncOrchestrator />
       </Suspense>
       <Toaster />
     </BrowserRouter>
