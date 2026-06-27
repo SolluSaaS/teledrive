@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TeleFile } from "@/lib/types";
 import { useFileStore } from "@/stores/fileStore";
 
@@ -224,16 +224,40 @@ export function useFileBrowserDragAndDrop({
     suppressClickRef.current = false;
   }, [isMobile]);
 
+  // Mirror the values the mousemove/mouseup handler reads into refs so the
+  // window listeners can be bound EXACTLY ONCE per mount. Previously this
+  // effect included `internalDrag` in its dep array, which changed on every
+  // mousemove tick (line ~261 calls setInternalDrag), causing the window
+  // listeners to be torn down and re-attached on EVERY drag pixel — easily
+  // 60+ listener re-binds per second of dragging.
+  const internalDragRef = useRef<InternalDragState | null>(null);
+  const moveDraggedItemsRef = useRef(moveDraggedItems);
+  const resetDragStateRef = useRef(resetDragState);
+  const startInternalDragRef = useRef(startInternalDrag);
+  const resolveDropTargetFromPointRef = useRef(resolveDropTargetFromPoint);
+  const selectedIdsRef = useRef(selectedIds);
+  const selectedIdsSetRef = useRef(selectedIdsSet);
+
+  // Sync refs on every render. Cheap — just one ref assignment each.
+  internalDragRef.current = internalDrag;
+  moveDraggedItemsRef.current = moveDraggedItems;
+  resetDragStateRef.current = resetDragState;
+  startInternalDragRef.current = startInternalDrag;
+  resolveDropTargetFromPointRef.current = resolveDropTargetFromPoint;
+  selectedIdsRef.current = selectedIds;
+  selectedIdsSetRef.current = selectedIdsSet;
+
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
       const candidate = dragCandidateRef.current;
-      if (candidate && !internalDrag) {
+      const liveDrag = internalDragRef.current;
+      if (candidate && !liveDrag) {
         const dx = e.clientX - candidate.startX;
         const dy = e.clientY - candidate.startY;
         if (Math.hypot(dx, dy) < 6) return;
 
         suppressClickRef.current = true;
-        startInternalDrag(
+        startInternalDragRef.current(
           candidate.file,
           candidate.previewVariant,
           e.clientX,
@@ -245,16 +269,18 @@ export function useFileBrowserDragAndDrop({
         );
       }
 
-      if (!internalDrag && !candidate) return;
+      if (!liveDrag && !candidate) return;
 
-      const activeDrag = internalDrag ?? (candidate ? {
-        ids: selectedIdsSet.has(candidate.file.id) ? [...selectedIds] : [candidate.file.id],
+      const activeDrag = liveDrag ?? (candidate ? {
+        ids: selectedIdsSetRef.current.has(candidate.file.id)
+          ? [...selectedIdsRef.current]
+          : [candidate.file.id],
         sourceId: candidate.file.id,
       } : null);
 
-      if (!activeDrag || !internalDrag) return;
+      if (!activeDrag || !liveDrag) return;
 
-      const dropTarget = resolveDropTargetFromPoint(e.clientX, e.clientY);
+      const dropTarget = resolveDropTargetFromPointRef.current(e.clientX, e.clientY);
       const validHoverId = dropTarget && !activeDrag.ids.includes(dropTarget) ? dropTarget : null;
       dragOverIdRef.current = validHoverId;
       setDragOverId(validHoverId);
@@ -263,12 +289,13 @@ export function useFileBrowserDragAndDrop({
 
     const handleWindowMouseUp = () => {
       dragCandidateRef.current = null;
-      if (!internalDrag) return;
+      const liveDrag = internalDragRef.current;
+      if (!liveDrag) return;
 
-      const draggedIds = [...internalDrag.ids];
+      const draggedIds = [...liveDrag.ids];
       const targetFolderId = dragOverIdRef.current;
-      resetDragState();
-      void moveDraggedItems(draggedIds, targetFolderId);
+      resetDragStateRef.current();
+      void moveDraggedItemsRef.current(draggedIds, targetFolderId);
 
       window.setTimeout(() => {
         suppressClickRef.current = false;
@@ -281,7 +308,7 @@ export function useFileBrowserDragAndDrop({
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };
-  }, [internalDrag, moveDraggedItems, resetDragState, resolveDropTargetFromPoint, selectedIds, selectedIdsSet, startInternalDrag]);
+  }, []);
 
   const handleDragOverCard = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
@@ -355,7 +382,7 @@ export function useFileBrowserDragAndDrop({
     }
   }, [clearSelection, folderPath, moveMultipleFilesOrFolders, resetDragState, resolveDraggedIds, resolveDropTargetFromEvent, resolveTargetFolderPath]);
 
-  return {
+  return useMemo(() => ({
     dragOverId,
     draggedId,
     internalDrag,
@@ -366,5 +393,16 @@ export function useFileBrowserDragAndDrop({
     handleDrop,
     handleGlobalDragOver,
     handleGlobalDrop,
-  };
+  }), [
+    dragOverId,
+    draggedId,
+    internalDrag,
+    isDraggingActive,
+    suppressClickRef,
+    handlePointerDown,
+    handleDragOverCard,
+    handleDrop,
+    handleGlobalDragOver,
+    handleGlobalDrop,
+  ]);
 }

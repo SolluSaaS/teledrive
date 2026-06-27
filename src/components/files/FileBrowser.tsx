@@ -137,6 +137,11 @@ function isDirectory(file: TeleFile): boolean {
   return file.mime === "inode/directory" || file.mime === "application/x-directory";
 }
 
+// Stable empty array reference — used as a fallback for `indexedFiles` so
+// consumers (and React deps) see the SAME identity on every render instead
+// of allocating a fresh `[]` each time. Avoids spurious downstream re-runs.
+const EMPTY_FILES: readonly TeleFile[] = Object.freeze([]) as readonly TeleFile[];
+
 
 const fileHoverStyles: Record<string, string> = {
   image: "hover:border-rose-300/80 dark:hover:border-rose-800/60 hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.35)]",
@@ -276,29 +281,41 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     return index;
   }, [activeFiles]);
 
-  const viewIndexes = useMemo(() => ({
-    starred: activeFiles.filter((file) => file.starred),
-    recent: activeFiles,
-    archived: files.filter((file) => file.archived && !file.trashed),
-    trash: files.filter((file) => file.trashed),
-  }), [activeFiles, files]);
+  // Compute ONLY the slice that the current `mode` actually needs.
+// Previously this allocated four filtered arrays eagerly (starred/recent/
+// archived/trash) on every render, costing 3×O(N) wasted work when only
+// one of them was being read by `displayFiles`. Now we compute exactly
+// one slice — and we only pay for folderEntriesIndex.get(folderPath) when
+// the user is on a drive/folder view.
+  const indexedFiles = useMemo(() => {
+    switch (mode) {
+      case "drive":
+        return folderEntriesIndex.get(folderPath) ?? EMPTY_FILES;
+      case "starred":
+        return activeFiles.filter((file) => file.starred);
+      case "recent":
+        return activeFiles;
+      case "trash":
+        return files.filter((file) => file.trashed);
+      case "archived":
+        return files.filter((file) => file.archived && !file.trashed);
+      default:
+        // search mode — fuzzySearch handles its own filtering; pass activeFiles.
+        return activeFiles;
+    }
+  }, [mode, folderEntriesIndex, folderPath, activeFiles, files]);
 
   // Full filtered + sorted display list — optimized for folder navigation
   const { displayFiles, folders, regularFiles } = useMemo(() => {
     let filtered: TeleFile[];
 
-    if (mode === "drive") {
-      filtered = [...(folderEntriesIndex.get(folderPath) ?? [])];
-    } else if (mode === "starred") {
-      filtered = [...viewIndexes.starred];
-    } else if (mode === "recent") {
-      filtered = [...viewIndexes.recent];
-    } else if (mode === "trash") {
-      filtered = [...viewIndexes.trash];
-    } else if (mode === "archived") {
-      filtered = [...viewIndexes.archived];
-    } else {
+    if (mode === "search") {
       filtered = fuzzySearch(activeFiles, searchQuery);
+    } else {
+      // Always copy before sorting so we never mutate the bucket arrays
+      // inside folderEntriesIndex (which are themselves memoized; mutating
+      // them silently corrupts the cache for the next render).
+      filtered = [...indexedFiles];
     }
 
     const visibleFiles =
@@ -337,7 +354,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       folders: nextFolders,
       regularFiles: nextRegularFiles,
     };
-  }, [activeFiles, activeSortBy, filterType, folderEntriesIndex, folderPath, mode, searchQuery, viewIndexes]);
+  }, [activeFiles, activeSortBy, filterType, indexedFiles, mode, searchQuery]);
 
   // Breadcrumbs — only recompute when folderPath changes
   const breadcrumbs = useMemo(() => {

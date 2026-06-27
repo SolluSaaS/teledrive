@@ -8,8 +8,53 @@ interface KeyboardShortcutsProps {
 }
 
 export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
-  const { files, selectedIds, currentFolder, setSelectedIds, clearSelection } = useFileStore();
+  // Granular selectors — avoids subscribing the effect to *every* store
+  // mutation (uploads, queue state, retry countdowns, etc.). The action
+  // callbacks are also pinned to refs so the keydown listener is bound
+  // exactly once per mount instead of being torn down + re-attached on
+  // every store change (which was costing ~2 listener re-binds per
+  // second during a Telegram retry).
+  const selectedIds = useFileStore((s) => s.selectedIds);
+  const currentFolder = useFileStore((s) => s.currentFolder);
+  const setSelectedIds = useFileStore((s) => s.setSelectedIds);
+  const clearSelection = useFileStore((s) => s.clearSelection);
   const { moveToTrash } = useFileActions();
+
+  // Keep mutable state in refs so the keydown handler is stable across renders
+  // and the window listener is bound exactly once.
+  const filesRef = useRef(useFileStore.getState().files);
+  const selectedIdsRef = useRef(selectedIds);
+  const currentFolderRef = useRef(currentFolder);
+  const moveToTrashRef = useRef(moveToTrash);
+  const onToggleHelpRef = useRef(onToggleHelp);
+  const setSelectedIdsRef = useRef(setSelectedIds);
+  const clearSelectionRef = useRef(clearSelection);
+
+  // Mirror latest values into refs on every render. The handler reads from
+  // refs at call time so it always sees the freshest snapshot without
+  // needing to be in the effect's dep array.
+  useEffect(() => {
+    filesRef.current = useFileStore.getState().files;
+  });
+  useEffect(() => {
+    selectedIdsRef.current = selectedIds;
+  }, [selectedIds]);
+  useEffect(() => {
+    currentFolderRef.current = currentFolder;
+  }, [currentFolder]);
+  useEffect(() => {
+    moveToTrashRef.current = moveToTrash;
+  }, [moveToTrash]);
+  useEffect(() => {
+    onToggleHelpRef.current = onToggleHelp;
+  }, [onToggleHelp]);
+  useEffect(() => {
+    setSelectedIdsRef.current = setSelectedIds;
+  }, [setSelectedIds]);
+  useEffect(() => {
+    clearSelectionRef.current = clearSelection;
+  }, [clearSelection]);
+
   const lastKeyRef = useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
   useEffect(() => {
@@ -30,6 +75,11 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
       // Detect Ctrl/Cmd modifier
       const isCmd = e.ctrlKey || e.metaKey;
 
+      // Read latest values from refs.
+      const files = filesRef.current;
+      const selected = selectedIdsRef.current;
+      const folder = currentFolderRef.current;
+
       // 1. Focus Search: "/" or "Ctrl+F" / "Cmd+F"
       if (e.key === "/" || (isCmd && e.key.toLowerCase() === "f")) {
         e.preventDefault();
@@ -44,7 +94,7 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
       // 2. Escape: Clear selection
       if (e.key === "Escape") {
         e.preventDefault();
-        clearSelection();
+        clearSelectionRef.current();
         return;
       }
 
@@ -55,7 +105,7 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
         let selectableFiles = [...files];
 
         if (path === "/drive/my-drive" || path.startsWith("/drive/folder/")) {
-          selectableFiles = selectableFiles.filter((f) => f.folderPath === currentFolder && !f.trashed);
+          selectableFiles = selectableFiles.filter((f) => f.folderPath === folder && !f.trashed);
         } else if (path === "/drive/starred") {
           selectableFiles = selectableFiles.filter((f) => f.starred && !f.trashed);
         } else if (path === "/drive/recent") {
@@ -64,13 +114,13 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
           selectableFiles = selectableFiles.filter((f) => f.trashed);
         }
 
-        setSelectedIds(selectableFiles.map((f) => f.id));
+        setSelectedIdsRef.current(selectableFiles.map((f) => f.id));
         return;
       }
 
       // 4. Delete: Move selected to trash (or delete permanently if in trash)
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedIds.length > 0) {
+        if (selected.length > 0) {
           e.preventDefault();
           const path = window.location.pathname;
           if (path === "/drive/trash") {
@@ -78,9 +128,9 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
             window.dispatchEvent(event);
           } else {
             // Move to trash (reversible — no confirmation needed)
-            const filesToTrash = files.filter((f) => selectedIds.includes(f.id));
-            filesToTrash.forEach((file) => moveToTrash(file));
-            clearSelection();
+            const filesToTrash = files.filter((f) => selected.includes(f.id));
+            filesToTrash.forEach((file) => moveToTrashRef.current(file));
+            clearSelectionRef.current();
           }
         }
         return;
@@ -88,9 +138,9 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
 
       // 5. Rename: F2
       if (e.key === "F2") {
-        if (selectedIds.length === 1) {
+        if (selected.length === 1) {
           e.preventDefault();
-          const targetFile = files.find((f) => f.id === selectedIds[0]);
+          const targetFile = files.find((f) => f.id === selected[0]);
           if (targetFile) {
             const event = new CustomEvent("teledrive-rename-file-event", { detail: targetFile });
             window.dispatchEvent(event);
@@ -101,9 +151,9 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
 
       // 6. Download: "Ctrl+D" / "Cmd+D"
       if (isCmd && e.key.toLowerCase() === "d") {
-        if (selectedIds.length === 1) {
+        if (selected.length === 1) {
           e.preventDefault();
-          const targetFile = files.find((f) => f.id === selectedIds[0]);
+          const targetFile = files.find((f) => f.id === selected[0]);
           if (targetFile && targetFile.mime !== "inode/directory" && targetFile.mime !== "application/x-directory") {
             const event = new CustomEvent("teledrive-download-file", { detail: targetFile });
             window.dispatchEvent(event);
@@ -115,7 +165,7 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
       // 7. Toggle Help: "?" or "Shift+Slash"
       if (e.key === "?" || (e.shiftKey && e.code === "Slash")) {
         e.preventDefault();
-        onToggleHelp();
+        onToggleHelpRef.current();
         return;
       }
 
@@ -145,5 +195,5 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [files, selectedIds, currentFolder, setSelectedIds, clearSelection, moveToTrash, onToggleHelp]);
+  }, []);
 }

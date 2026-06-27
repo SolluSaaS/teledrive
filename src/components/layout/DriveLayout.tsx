@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive } from "lucide-react";
+import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive, AlertTriangle, RefreshCw } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
@@ -333,6 +333,9 @@ export default function DriveLayout() {
   const files = useFileStore((state) => state.files);
   const isSyncing = useFileStore((state) => state.isSyncing);
   const draggedItemIds = useFileStore((state) => state.draggedItemIds);
+  const indexQueueState = useFileStore((state) => state.indexQueueState);
+  const indexQueueRetryInSec = useFileStore((state) => state.indexQueueRetryInSec);
+  const indexQueueError = useFileStore((state) => state.indexQueueError);
 
   useEffect(() => {
     if (draggedItemIds.length === 0) {
@@ -345,9 +348,18 @@ export default function DriveLayout() {
     const n = Number(raw);
     return isFinite(n) && n >= 0 ? n : 0;
   };
-  const totalSizeBytes = files
-    .filter((f) => !f.trashed && f.mime !== "inode/directory")
-    .reduce((acc, f) => acc + safeSize(f.size), 0);
+  // Memoize the storage footer sum. Was running an O(N) filter + reduce on
+  // every DriveLayout render (which is every `files` change — including
+  // unrelated mutations like selection toggles and queue countdowns).
+  const totalSizeBytes = useMemo(() => {
+    let total = 0;
+    for (const f of files) {
+      if (!f.trashed && f.mime !== "inode/directory") {
+        total += safeSize(f.size);
+      }
+    }
+    return total;
+  }, [files]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes || !isFinite(bytes) || bytes <= 0) return "0 Bytes";
@@ -561,10 +573,64 @@ export default function DriveLayout() {
 
         {/* Right side items */}
         <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
-          {isSyncing && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 text-slate-500 dark:text-slate-400 select-none animate-in fade-in duration-200">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500 shrink-0" />
-              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wide">Syncing</span>
+          {/* Index queue state pill.
+              Three visible states:
+              - failed: amber/red pill with a "Retry" button (uses window.__teledriveRetryIndex)
+              - retrying: spinner + "Retrying in Xs"
+              - saving (or isSyncing): spinner + "Syncing" (legacy behavior preserved)
+              Hidden when idle and no optimistic op is in flight. */}
+          {(indexQueueState === "failed" ||
+            indexQueueState === "retrying" ||
+            (isSyncing && indexQueueState === "saving")) && (
+            <div
+              title={
+                indexQueueState === "failed"
+                  ? indexQueueError ?? "Index save failed — click to retry"
+                  : indexQueueState === "retrying" && indexQueueError
+                  ? indexQueueError
+                  : undefined
+              }
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border",
+                indexQueueState === "failed"
+                  ? "bg-amber-50/90 dark:bg-amber-950/40 border-amber-300/60 dark:border-amber-700/50 text-amber-700 dark:text-amber-300"
+                  : "bg-slate-100/80 dark:bg-slate-900/60 border-slate-200/50 dark:border-slate-800/50 text-slate-500 dark:text-slate-400"
+              )}
+            >
+              {indexQueueState === "failed" ? (
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500 shrink-0" />
+              )}
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wide">
+                {indexQueueState === "failed"
+                  ? "Save failed"
+                  : indexQueueState === "retrying" && indexQueueRetryInSec > 0
+                  ? `Retrying in ${indexQueueRetryInSec}s`
+                  : "Syncing"}
+              </span>
+              {indexQueueState === "failed" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fn = (window as any).__teledriveRetryIndex;
+                    const phone = useAuthStore.getState().phoneNumber;
+                    if (typeof fn === "function" && phone) {
+                      // Look up the active channel id via the global hook.
+                      import("@/lib/secure/vault").then(({ getSecret, channelIdKey, VAULT_KEY_CHANNEL_ID }) =>
+                        getSecret(channelIdKey(phone))
+                          .then((cid) => cid || getSecret(VAULT_KEY_CHANNEL_ID))
+                          .then((cid) => cid && fn(cid))
+                          .catch(() => fn(phone))
+                      );
+                    }
+                  }}
+                  className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 hover:bg-amber-300/70 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-100 text-[10px] font-semibold uppercase tracking-wide transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
+              )}
             </div>
           )}
 
