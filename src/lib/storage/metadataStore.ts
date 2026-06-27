@@ -269,16 +269,22 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
  * Pinning is best-effort (non-fatal). loadIndex falls back to a scan if
  * the pinned messages aren't available.
  */
-export async function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
-  const client = getClient();
-  let peer: any;
+let activeSavePromise: Promise<void> = Promise.resolve();
 
-  try {
-    peer = await resolveChannelInputPeer(channelId);
-  } catch (err) {
-    console.error("[metadataStore] Failed to resolve channel entity for save:", err);
-    throw err;
-  }
+export async function saveIndex(channelId: string, files: TeleFile[]): Promise<void> {
+  // Wait for any previous save to completely finish (success or failure)
+  await activeSavePromise.catch(() => {});
+
+  const savePromise = (async () => {
+    const client = getClient();
+    let peer: any;
+
+    try {
+      peer = await resolveChannelInputPeer(channelId);
+    } catch (err) {
+      console.error("[metadataStore] Failed to resolve channel entity for save:", err);
+      throw err;
+    }
 
   // CHUNK_SIZE = 15 is safe for Telegram 4096-character limit per message
   const CHUNK_SIZE = 15;
@@ -481,7 +487,11 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     });
 
     await Promise.all(sendPromises);
-  }
+    }
+  })();
+
+  activeSavePromise = savePromise;
+  return savePromise;
 }
 
 /**

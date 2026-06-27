@@ -1,5 +1,5 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
-import { updateFile, deleteTelegramMessage, runExclusiveWithTimeout, withTimeout } from "../lib/storage/metadataStore";
+import { updateFile, deleteTelegramMessage, withTimeout } from "../lib/storage/metadataStore";
 import { saveIndex } from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
@@ -97,11 +97,9 @@ async function performIndexSave(cid: string) {
         state: `SAVE_INDEX_ATTEMPT_${attempt}: saving ${filesToSave.length} files`
       }).catch(() => {});
 
-      // Acquire mutex lock (up to 15s timeout to prevent deadlocks)
-      await runExclusiveWithTimeout(async () => {
-        // Run index save (up to 30s timeout per attempt)
-        await withTimeout(saveIndex(cid, filesToSave), 30000, "saveIndex");
-      });
+      // Run index save (up to 30s timeout per attempt)
+      // Note: No mutex lock is acquired here because saveIndex is globally serialized in metadataStore.ts
+      await withTimeout(saveIndex(cid, filesToSave), 30000, "saveIndex");
 
       // Update baselines upon successful remote persistence
       lastKnownGoodFiles = filesToSave;
