@@ -280,11 +280,17 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
     throw err;
   }
 
-  // 1. Find ALL existing index messages (pinned or not) and delete them.
-  //    This prevents duplicates from accumulating.
-  let oldIndexMsgIds: number[] = [];
+  // CHUNK_SIZE = 15 is safe for Telegram 4096-character limit per message
+  const CHUNK_SIZE = 15;
+  const chunks: TeleFile[][] = [];
+  for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+    chunks.push(files.slice(i, i + CHUNK_SIZE));
+  }
+  if (chunks.length === 0) chunks.push([]);
+
+  // Find existing index messages to edit in-place
+  let existingIndexMsgs: any[] = [];
   try {
-    // Check pinned messages
     const pinned = await withTimeout(
       client.getMessages(peer, {
         filter: new Api.InputMessagesFilterPinned(),
@@ -293,96 +299,189 @@ export async function saveIndex(channelId: string, files: TeleFile[]): Promise<v
       5000,
       "client.getMessages(pinned_save)"
     );
-    const fromPinned = pinned
+    existingIndexMsgs = pinned
       .filter((m: any) => m?.text?.includes("teledrive_index"))
-      .map((m: any) => m.id);
-
-    // Also check recent messages in case some aren't pinned
-    const recent = await withTimeout(
-      client.getMessages(peer, { limit: 200 }),
-      5000,
-      "client.getMessages(recent_save)"
-    );
-    const fromRecent = recent
-      .filter((m: any) => m?.text?.includes("teledrive_index"))
-      .map((m: any) => m.id);
-
-    // Union of both sets
-    oldIndexMsgIds = [...new Set([...fromPinned, ...fromRecent])];
+      .sort((a: any, b: any) => a.id - b.id);
   } catch (err) {
-    console.warn("[metadataStore] Could not enumerate old index messages:", err);
+    console.warn("[metadataStore] Could not load pinned index messages for edit:", err);
   }
 
-  // Unpin and delete all old index messages in a single batch operation.
-  // Deleting the message automatically removes it from the pinned list.
-  if (oldIndexMsgIds.length > 0) {
+  if (existingIndexMsgs.length === 0) {
     try {
-      await withTimeout(
-        client.deleteMessages(peer, oldIndexMsgIds, { revoke: true }),
+      const recent = await withTimeout(
+        client.getMessages(peer, { limit: 100 }),
         5000,
-        "deleteMessages(batch)"
+        "client.getMessages(recent_save)"
       );
-    } catch (err: any) {
-      console.warn(
-        `[metadataStore] Batch delete of old index messages failed (non-fatal):`,
-        err?.message || err
-      );
+      existingIndexMsgs = recent
+        .filter((m: any) => m?.text?.includes("teledrive_index"))
+        .sort((a: any, b: any) => a.id - b.id);
+    } catch (err) {
+      console.warn("[metadataStore] Could not load recent index messages for edit:", err);
     }
   }
 
-  // 2. Chunk files (≤15 files per chunk to stay under 4096 chars)
-  const CHUNK_SIZE = 15;
-  const chunks: TeleFile[][] = [];
-  for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-    chunks.push(files.slice(i, i + CHUNK_SIZE));
-  }
-  if (chunks.length === 0) chunks.push([]);
+  // Attempt smart in-place editing to avoid creating/pinning/deleting messages
+  let inPlaceSuccess = true;
+  try {
+    const editPromises = chunks.map(async (chunk, i) => {
+      const payload = {
+        teledrive_index: true,
+        version: 1,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+        files: chunk,
+      };
+      const text = JSON.stringify(payload);
 
-  // 3. Send fresh index messages and try to pin each in parallel
-  const sendPromises = chunks.map(async (chunk, i) => {
-    const payload = {
-      teledrive_index: true,
-      version: 1,
-      chunkIndex: i,
-      totalChunks: chunks.length,
-      files: chunk,
-    };
-    const text = JSON.stringify(payload);
+      if (i < existingIndexMsgs.length) {
+        // Edit existing message in-place (no new message/pin created)
+        await withTimeout(
+          client.editMessage(peer, {
+            message: existingIndexMsgs[i].id,
+            text: text,
+          }),
+          8000,
+          `editMessage(chunk ${i})`
+        );
+      } else {
+        // Send new chunk message and pin it
+        const result = await withTimeout(
+          client.sendMessage(peer, { message: text }),
+          8000,
+          `sendMessage(chunk ${i})`
+        );
+        try {
+          await withTimeout(
+            client.invoke(
+              new Api.messages.UpdatePinnedMessage({
+                peer,
+                id: result.id,
+                unpin: false,
+                silent: true,
+              })
+            ),
+            4000,
+            `UpdatePinnedMessage(pin chunk ${i})`
+          );
+        } catch (pinErr: any) {
+          console.warn(
+            `[metadataStore] Could not pin new index chunk ${i} (id=${result.id}):`,
+            pinErr?.message || pinErr
+          );
+        }
+      }
+    });
 
-    try {
-      const result = await withTimeout(
-        client.sendMessage(peer, { message: text }),
-        8000,
-        `sendMessage(chunk ${i})`
-      );
+    await Promise.all(editPromises);
 
-      // Pin best-effort
+    // Delete any extra old index messages if the new index is smaller
+    if (existingIndexMsgs.length > chunks.length) {
+      const extraMsgIds = existingIndexMsgs.slice(chunks.length).map((m) => m.id);
       try {
         await withTimeout(
-          client.invoke(
-            new Api.messages.UpdatePinnedMessage({
-              peer,
-              id: result.id,
-              unpin: false,
-              silent: true,
-            })
-          ),
-          4000,
-          `UpdatePinnedMessage(pin chunk ${i})`
+          client.deleteMessages(peer, extraMsgIds, { revoke: true }),
+          5000,
+          "deleteMessages(extra chunks)"
         );
-      } catch (pinErr: any) {
+      } catch (delErr: any) {
+        console.warn("[metadataStore] Failed to delete extra chunks:", delErr?.message || delErr);
+      }
+    }
+  } catch (err: any) {
+    console.warn("[metadataStore] In-place edit failed or rate-limited. Falling back to nuclear rewrite:", err?.message || err);
+    inPlaceSuccess = false;
+  }
+
+  // Fallback to nuclear rewrite if in-place edit failed or timed out
+  if (!inPlaceSuccess) {
+    let oldIndexMsgIds: number[] = [];
+    try {
+      const pinned = await withTimeout(
+        client.getMessages(peer, {
+          filter: new Api.InputMessagesFilterPinned(),
+          limit: 100,
+        }),
+        5000,
+        "client.getMessages(pinned_save)"
+      );
+      const fromPinned = pinned
+        .filter((m: any) => m?.text?.includes("teledrive_index"))
+        .map((m: any) => m.id);
+
+      const recent = await withTimeout(
+        client.getMessages(peer, { limit: 200 }),
+        5000,
+        "client.getMessages(recent_save)"
+      );
+      const fromRecent = recent
+        .filter((m: any) => m?.text?.includes("teledrive_index"))
+        .map((m: any) => m.id);
+
+      oldIndexMsgIds = [...new Set([...fromPinned, ...fromRecent])];
+    } catch (err) {
+      console.warn("[metadataStore] Could not enumerate old index messages for fallback:", err);
+    }
+
+    if (oldIndexMsgIds.length > 0) {
+      try {
+        await withTimeout(
+          client.deleteMessages(peer, oldIndexMsgIds, { revoke: true }),
+          5000,
+          "deleteMessages(batch)"
+        );
+      } catch (err: any) {
         console.warn(
-          `[metadataStore] Could not pin index chunk ${i} (id=${result.id}):`,
-          pinErr?.message || pinErr
+          `[metadataStore] Batch delete of old index messages failed (non-fatal):`,
+          err?.message || err
         );
       }
-    } catch (sendErr) {
-      console.error(`[metadataStore] Failed to send index chunk ${i}:`, sendErr);
-      throw sendErr;
     }
-  });
 
-  await Promise.all(sendPromises);
+    const sendPromises = chunks.map(async (chunk, i) => {
+      const payload = {
+        teledrive_index: true,
+        version: 1,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+        files: chunk,
+      };
+      const text = JSON.stringify(payload);
+
+      try {
+        const result = await withTimeout(
+          client.sendMessage(peer, { message: text }),
+          8000,
+          `sendMessage(chunk ${i})`
+        );
+
+        try {
+          await withTimeout(
+            client.invoke(
+              new Api.messages.UpdatePinnedMessage({
+                peer,
+                id: result.id,
+                unpin: false,
+                silent: true,
+              })
+            ),
+            4000,
+            `UpdatePinnedMessage(pin chunk ${i})`
+          );
+        } catch (pinErr: any) {
+          console.warn(
+            `[metadataStore] Could not pin index chunk ${i} (id=${result.id}):`,
+            pinErr?.message || pinErr
+          );
+        }
+      } catch (sendErr) {
+        console.error(`[metadataStore] Failed to send index chunk ${i}:`, sendErr);
+        throw sendErr;
+      }
+    });
+
+    await Promise.all(sendPromises);
+  }
 }
 
 /**
