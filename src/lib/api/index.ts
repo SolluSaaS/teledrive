@@ -10,4 +10,5 @@ export { getLicense, deactivateLicense, type LicenseResponse } from './license';
 export { listDevices, revokeDevice } from './devices';
 export { createOrder } from './payment';
 export { recordBackupJob, listBackupHistory } from './backup';
+export { recordEvent, listRecentEvents, type RecordEventResponse } from './events';
 export { loadRazorpayScript, getRazorpay } from './razorpayLoader';

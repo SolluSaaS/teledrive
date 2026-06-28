@@ -122,6 +122,34 @@ export interface BackupHistoryResponse {
   items: BackupJob[];
 }
 
+/**
+ * One row in the user's activity audit trail. Mirrors the
+ * teledrive-backend EventLog model.
+ */
+export interface EventLog {
+  id: string;
+  /** Event type. Free-form; known values listed in EVENT_TYPES. */
+  type: string;
+  /** Event-specific data. JSON-safe primitives + nested objects only. */
+  payload: Record<string, unknown>;
+  /** When the event happened on the desktop. */
+  occurredAt: string; // ISO 8601
+  /** When the backend persisted the row. */
+  createdAt: string;  // ISO 8601
+}
+
+/** Body for POST /api/events/log. */
+export interface RecordEventRequest {
+  type: string;
+  payload?: Record<string, unknown>;
+  occurredAt?: string; // ISO 8601
+}
+
+/** Response from GET /api/events/recent. */
+export interface EventRecentResponse {
+  items: EventLog[];
+}
+
 /** Response from /api/auth/login. */
 export interface LoginResponse {
   jwt: string;

@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import BackupSection from "@/components/settings/BackupSection";
+import ActivitySection from "@/components/settings/ActivitySection";
 import {
   Dialog,
   DialogContent,
@@ -298,6 +299,9 @@ export default function PlanSection() {
 
       {/* Pro-only feature: live multi-device sync + scheduled backup. */}
       <BackupSection />
+
+      {/* Pro-only feature: unified activity timeline. */}
+      <ActivitySection />
 
       <UpgradeModal open={upgradeOpen} onOpenChange={setUpgradeOpen} />
 

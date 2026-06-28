@@ -73,6 +73,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { enqueueSave } from "../storage/indexQueue";
 import { getClient } from "../telegram/client";
+import { logEvent } from "../events";
 
 /**
  * Wait until `bootstrapComplete=true` on the file store, capped at `timeoutMs`.
@@ -272,6 +273,10 @@ export async function processQueue(): Promise<void> {
             await invoke("log_vault_state", {
               state: `UPLOAD_INDEX_OK name=${item.name} files=${optimisticFiles.length}`,
             }).catch(() => {});
+            logEvent({
+              type: "file.uploaded",
+              payload: { name: item.name, size: Number(newFile.size) || 0 },
+            });
           } catch (indexErr: any) {
             // Hard error from the queue (auth lost, channel missing, etc.).
             // Roll back the optimistic files array for this single upload by
