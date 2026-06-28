@@ -74,6 +74,23 @@ import { invoke } from "@tauri-apps/api/core";
 import { enqueueSave } from "../storage/indexQueue";
 import { getClient } from "../telegram/client";
 
+/**
+ * Wait until `bootstrapComplete=true` on the file store, capped at `timeoutMs`.
+ * The orphan recovery scan in bootstrap.ts runs BEFORE it flips bootstrapComplete,
+ * so the upload's optimistic-state merge won't miss files the scan is about to
+ * discover. Without this gate, an upload that lands during the scan would write
+ * a partial state (only the new file) to Telegram, silently overwriting the
+ * previous full index — the bug that wiped the user's files on logout/relogin.
+ */
+async function waitForBootstrap(timeoutMs: number = 8000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (useFileStore.getState().bootstrapComplete) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return useFileStore.getState().bootstrapComplete;
+}
+
 let isProcessing = false;
 
 /**
@@ -217,6 +234,29 @@ export async function processQueue(): Promise<void> {
           //     same index commit.
           //   - FLOOD_WAIT backoff is handled identically to user actions,
           //     so no separate retry loop is needed here.
+          //
+          // Bootstrap gate: wait up to 8s for bootstrap to finish. If it
+          // doesn't (network blip during recovery), bail out of the index
+          // save rather than writing a partial state that wipes the previous
+          // full index. The file itself is already on Telegram — only the
+          // metadata index write is skipped, and the next orphan scan will
+          // pick it up.
+          const bootstrapReady = await waitForBootstrap(8000);
+          if (!bootstrapReady) {
+            await invoke("log_vault_state", {
+              state: `UPLOAD_INDEX_SKIPPED_PRE_BOOTSTRAP name=${item.name} mid=${newFile.messageId}`,
+            }).catch(() => {});
+            updateQueueItem(item.id, {
+              status: "error",
+              error: "Recovery still in progress — refresh to retry",
+            });
+            toast.warning(
+              `"${item.name}" uploaded, but the file list is still recovering. Refresh in a moment to see it.`,
+              { duration: 6000 }
+            );
+            return;
+          }
+
           const existingFiles = useFileStore.getState().files;
           const optimisticFiles = [
             ...existingFiles.filter((f) => f.id !== newFile.id),

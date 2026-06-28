@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { LinkIcon, Smartphone, Database } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { useLicenseStore } from "@/stores/licenseStore";
 import { deleteSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_CHANNEL_ID, channelIdKey } from "@/lib/secure/vault";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,22 @@ export default function TelegramAccountSection() {
       // Step 4: Reset auth/file stores
       logout();
       const { useFileStore } = await import("@/stores/fileStore");
-      useFileStore.setState({ files: [], selectedIds: [], currentFolder: "/" });
+      // Reset bootstrapComplete too — otherwise the next login's uploads
+      // would race the orphan scan (waitForBootstrap returns immediately
+      // because the flag is still true) and could write a partial state.
+      useFileStore.setState({
+        files: [],
+        selectedIds: [],
+        selectedIdsSet: new Set(),
+        currentFolder: "/",
+        bootstrapComplete: false,
+      });
+
+      // Step 5: Wipe backend license session (best-effort). Best-effort because
+      // the backend may already be unreachable on this machine.
+      await useLicenseStore.getState().logoutFromBackend().catch((err) => {
+        console.warn("Backend logout failed (non-fatal):", err);
+      });
 
       toast.success("Disconnected Telegram account successfully.");
       navigate("/auth");

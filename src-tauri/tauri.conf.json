@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: localhost: http://localhost:1420; script-src 'self' 'unsafe-eval' 'unsafe-inline' localhost:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.telegram.org; media-src 'self' blob: data: https://*.telegram.org; connect-src 'self' wss://*.telegram.org https://*.telegram.org ws://localhost:1420 http://localhost:1420;"
+      "csp": "default-src 'self' tauri: localhost: http://localhost:1420; script-src 'self' 'unsafe-eval' 'unsafe-inline' localhost: https://checkout.razorpay.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.telegram.org; media-src 'self' blob: data: https://*.telegram.org; connect-src 'self' wss://*.telegram.org https://*.telegram.org ws://localhost:1420 http://localhost:1420 http://localhost:3000 https://api.razorpay.com https://lumberjack.razorpay.com;"
     }
   },
   "bundle": {

@@ -1,5 +1,9 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
-import { deleteTelegramMessage } from "../lib/storage/metadataStore";
+import {
+  deleteTelegramMessage,
+  fullPathForFolder,
+  findFoldersByPath,
+} from "../lib/storage/metadataStore";
 import { useFileStore } from "../stores/fileStore";
 import { useAuthStore } from "../stores/authStore";
 import { TeleFile } from "../lib/types";
@@ -207,9 +211,25 @@ export function useFileActions() {
     if (!name.trim()) return;
     try {
       const channelId = await getChannelId();
+      const trimmed = name.trim();
+
+      // No-op if a folder with the same full path already exists. With the
+      // pre-fix code, the UI would happily create a second `Code` folder
+      // every time the user typed the same name — and `reconstructMissingFolders`
+      // would also re-create one on the next bootstrap. This guard closes that
+      // loop at the user-facing entry point.
+      const files = useFileStore.getState().files;
+      const targetParent = normalizeFolderPath(currentFolder);
+      const newFullPath =
+        targetParent === "/" ? `/${trimmed}` : `${targetParent}/${trimmed}`;
+      if (findFoldersByPath(files, newFullPath).length > 0) {
+        toast.info(`Folder "${trimmed}" already exists`);
+        return;
+      }
+
       const newFolder: TeleFile = {
         id: Math.random().toString(36).substring(2, 11),
-        name: name.trim(),
+        name: trimmed,
         size: 0,
         mime: "inode/directory",
         folderPath: currentFolder,
@@ -220,8 +240,7 @@ export function useFileActions() {
         trashed: false,
       };
 
-      const files = useFileStore.getState().files;
-      toast.success(`Folder "${name}" created successfully`);
+      toast.success(`Folder "${trimmed}" created successfully`);
       await applyOptimistic(channelId, [...files, newFolder]);
     } catch (err: any) {
       console.error("Failed to create folder:", err);
@@ -237,31 +256,43 @@ export function useFileActions() {
       const fileToRename = allFiles.find((f) => f.id === fileId);
       if (!fileToRename) throw new Error("File not found");
 
-      const isFolder = fileToRename.mime === "inode/directory" || fileToRename.mime === "application/x-directory";
+      const isFolderRename = fileToRename.mime === "inode/directory" || fileToRename.mime === "application/x-directory";
 
       let oldPath = "";
       let newPath = "";
-      if (isFolder) {
-        oldPath = fileToRename.folderPath === "/"
-          ? `/${fileToRename.name}`
-          : `${fileToRename.folderPath}/${fileToRename.name}`;
-
+      if (isFolderRename) {
+        // Match by path, not by id — every folder entry sharing the same
+        // full path gets renamed together. With duplicates, matching by id
+        // would only rename one entry and leave the others at the old name,
+        // which is exactly what produced the "stale folder" bug.
+        oldPath = fullPathForFolder(fileToRename);
+        const trimmedName = newName.trim();
         newPath = fileToRename.folderPath === "/"
-          ? `/${newName.trim()}`
-          : `${fileToRename.folderPath}/${newName.trim()}`;
+          ? `/${trimmedName}`
+          : `${fileToRename.folderPath}/${trimmedName}`;
       }
 
       const updatedFiles = allFiles.map((f) => {
-        if (f.id === fileId) {
-          return { ...f, name: newName.trim() };
-        }
-        if (isFolder) {
+        if (isFolderRename) {
+          // Apply rename to ALL folder entries sharing the old full path
+          // (handles duplicates from the pre-fix bootstrap bug).
+          if (isFolder(f) && fullPathForFolder(f) === oldPath) {
+            return { ...f, name: newName.trim() };
+          }
+          // Children whose folderPath equals the old folder path get moved.
           if (f.folderPath === oldPath) {
             return { ...f, folderPath: newPath };
           }
+          // Descendants (subfolders / files inside subfolders) get the new prefix.
           if (f.folderPath.startsWith(oldPath + "/")) {
             return { ...f, folderPath: newPath + f.folderPath.substring(oldPath.length) };
           }
+          return f;
+        }
+        // File (non-folder) rename: id-based rename still works because
+        // each uploaded file has exactly one entry per messageId now.
+        if (f.id === fileId) {
+          return { ...f, name: newName.trim() };
         }
         return f;
       });
@@ -788,12 +819,19 @@ export function useFileActions() {
         });
       
       const updatedFiles = files.map((f) => {
+        // Files/folers explicitly selected: re-home them.
         if (rootSelectedIds.has(f.id)) {
           if (normalizeFolderPath(f.folderPath) === normalizedTargetPath) return f;
           return { ...f, folderPath: normalizedTargetPath };
         }
 
         for (const { oldFullPath, newFullPath } of movedRootFolders) {
+          // Apply the path shift to EVERY folder entry sharing the old full
+          // path — handles duplicates from the pre-fix bootstrap bug. Files
+          // (non-folders) match by their `folderPath` field as before.
+          if (isFolder(f) && fullPathForFolder(f) === oldFullPath) {
+            return { ...f, folderPath: newFullPath };
+          }
           const currentPath = normalizeFolderPath(f.folderPath);
           if (currentPath === oldFullPath) {
             return { ...f, folderPath: newFullPath };

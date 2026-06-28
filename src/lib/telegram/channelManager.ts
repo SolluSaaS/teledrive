@@ -100,3 +100,34 @@ export async function ensureStorageChannel(phone: string): Promise<string> {
   }
 }
 
+/**
+ * Look up the storage channel id WITHOUT contacting Telegram.
+ *
+ * Used by the multi-device sync orchestrator and the backup scheduler,
+ * both of which need to know the channel id WITHOUT triggering a full
+ * `ensureStorageChannel` (which would do dialog searches and potentially
+ * create a new channel — too heavy for a background tick).
+ *
+ * Returns the phone-keyed id if present, else the legacy generic key.
+ * Returns null if neither is set yet (i.e. user hasn't completed first
+ * login). The caller should treat null as "wait for bootstrap" and
+ * retry shortly.
+ *
+ * @param phone  The authenticated phone number, e.g. "+918653420095".
+ *               Falls back to the legacy generic key if empty.
+ */
+export async function getStorageChannelId(phone?: string | null): Promise<string | undefined> {
+  const phoneStr = phone ?? "";
+  try {
+    if (phoneStr) {
+      const phoneKey = channelIdKey(phoneStr);
+      const id = await getSecret(phoneKey);
+      if (id) return id;
+    }
+    const legacy = await getSecret(VAULT_KEY_CHANNEL_ID);
+    return legacy ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+

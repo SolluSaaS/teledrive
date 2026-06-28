@@ -8,6 +8,8 @@ import { initClient, getClient } from "@/lib/telegram/client";
 import { saveSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
 import { DEFAULT_API_ID, DEFAULT_API_HASH } from "@/lib/telegram/config";
+import { useLicenseStore } from "@/stores/licenseStore";
+import { detectOS, getDeviceName } from "@/lib/secure/deviceInfo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -237,7 +239,7 @@ export default function AuthPage() {
 
   const completeAuthentication = async (client: any) => {
     const sessionString = client.session.save() as string;
-    
+
     // ── Primary: save session to the Rust file-backed store ──────────────────
     // This is reliable, fast, and survives dev-server restarts.
     try {
@@ -254,41 +256,109 @@ export default function AuthPage() {
       console.warn("Stronghold saveSecret failed (non-fatal):", vaultErr);
     }
 
-    // Update Zustand store
-    setSession(sessionString, phone.trim());
-
-    toast.success("Successfully logged in to Telegram!");
-    setStep("bootstrap");
-  };
-
-  useEffect(() => {
-    if (step !== "bootstrap") return;
-
-    let isMounted = true;
-    async function runBootstrap() {
-      setBootstrapError(null);
+    // ── Backend license login (best-effort, non-blocking) ──────────────────
+    // We log in to the license server so this device is recorded under the
+    // user's account and so we get a JWT for future authenticated calls.
+    // Failures (backend down, network error) only warn — bootstrap still
+    // proceeds and the user can refresh in Settings → Plan & Devices later.
+    //
+    // IMPORTANT: telegramUserId must be the REAL Telegram user ID returned
+    // by Telegram's auth.getMe (a numeric ID like 1234567890), NOT the phone
+    // digits. The phone digit string is what the user previously sent,
+    // which (a) wasn't a stable identifier for the user across Telegram
+    // accounts sharing a phone, and (b) caused a fresh User row on the
+    // backend every time the phone was re-entered with different formatting.
+    try {
+      let telegramUserId: string;
       try {
-        await bootstrapTeleDrive((status) => {
-          if (isMounted) setBootstrapStatus(status);
-        }, phone.trim());
-        if (isMounted) {
-          toast.success("TeleDrive is ready!");
-          navigate("/drive/my-drive");
+        const me = await client.getMe();
+        // GramJS returns a User object whose .id is a bigint-like numeric.
+        // Normalize to a base-10 string that matches what `auth.getMe` would
+        // return server-side and what the backend expects in its zod schema
+        // (digits-only, 1..64 chars).
+        telegramUserId = String((me as any)?.id ?? "");
+        if (!/^\d{1,64}$/.test(telegramUserId)) {
+          throw new Error(
+            `getMe returned non-numeric id: ${JSON.stringify(telegramUserId).slice(0, 80)}`
+          );
         }
-      } catch (err: any) {
-        console.error("Bootstrap failed:", err);
-        if (isMounted) {
-          setBootstrapError(err.message || "Failed to bootstrap storage channel. Please retry.");
+      } catch (meErr) {
+        // Hard fallback: phone digits. This MUST still produce a stable
+        // value for the SAME login flow so we don't create a duplicate
+        // user — but we'll also retry getMe() once after a short delay
+        // because some GramJS builds race the auth response.
+        console.warn("[AuthPage] client.getMe() failed, falling back to phone digits:", meErr);
+        telegramUserId = phone.trim().replace(/[^\d]/g, "");
+        await new Promise((r) => setTimeout(r, 250));
+        try {
+          const me2 = await client.getMe();
+          const retry = String((me2 as any)?.id ?? "");
+          if (/^\d{1,64}$/.test(retry)) {
+            telegramUserId = retry;
+          }
+        } catch {
+          // keep phone-digits fallback
         }
       }
+
+      await invoke("log_vault_state", {
+        state: `BACKEND_LOGIN_START telegramUserId=${telegramUserId} phone=${phone.trim()}`,
+      }).catch(() => {});
+
+      await useLicenseStore.getState().loginToBackend({
+        telegramUserId,
+        phoneNumber: phone.trim(),
+        deviceName: getDeviceName(),
+        os: detectOS(),
+      });
+      if (useLicenseStore.getState().backendReachable) {
+        toast.success("Connected to license server");
+      } else {
+        await invoke("log_vault_state", {
+          state: `BACKEND_LOGIN_UNREACHABLE after loginToBackend (will retry on next cold start)`,
+        }).catch(() => {});
+      }
+    } catch (backendErr) {
+      console.warn("Backend license login failed (non-fatal):", backendErr);
+      await invoke("log_vault_state", {
+        state: `BACKEND_LOGIN_ERR: ${backendErr instanceof Error ? backendErr.message : String(backendErr)}`,
+      }).catch(() => {});
     }
 
-    runBootstrap();
+    // ── Bootstrap (load Telegram index → set files in store) ───────────────
+    // Run inline BEFORE `setSession` so the AuthPage stays mounted through
+    // the whole flow. If we set `isAuthenticated=true` first, the GuestRoute
+    // immediately navigates to /drive/my-drive and UNMOUNTS AuthPage —
+    // which silently drops the bootstrap useEffect's setFiles() call and
+    // leaves the user on a blank drive page after re-login.
+    //
+    // By awaiting bootstrapTeleDrive here, files land in the file store
+    // BEFORE we flip auth, so the user lands on /drive/my-drive with all
+    // 37 files already visible.
+    setStep("bootstrap");
+    try {
+      await bootstrapTeleDrive((status) => {
+        setBootstrapStatus(status);
+      }, phone.trim());
+      toast.success("TeleDrive is ready!");
+      // Now it's safe to flip auth — the bootstrap is fully done and the
+      // file store is hydrated. GuestRoute will navigate to /drive/my-drive
+      // and FileBrowser will see all 37 files.
+      setSession(sessionString, phone.trim());
+      navigate("/drive/my-drive");
+    } catch (err: any) {
+      console.error("Bootstrap failed:", err);
+      setBootstrapError(err.message || "Failed to bootstrap storage channel. Please retry.");
+      // Don't navigate; stay on the bootstrap screen so the user sees the error.
+    }
+  };
 
-    return () => {
-      isMounted = false;
-    };
-  }, [step, navigate]);
+  // Bootstrap is awaited inline in `completeAuthentication` BEFORE we call
+  // `setSession`. That ordering is what keeps the GuestRoute from
+  // unmounting AuthPage mid-bootstrap (which used to silently drop the
+  // setFiles() call and leave the user with an empty drive page after
+  // re-login). The `step === "bootstrap"` state is kept only to render
+  // the bootstrap status screen.
 
   if (checkingConfig) {
     return (
