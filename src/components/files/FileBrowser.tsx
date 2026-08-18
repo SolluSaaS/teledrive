@@ -24,6 +24,7 @@ import {
   Check,
   Plus,
   MoreHorizontal,
+  Shield,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -54,6 +55,8 @@ import { fuzzySearch } from "@/lib/search/searchEngine";
 import { getFileCategory, getFileIconType } from "@/lib/files/fileUtils";
 import { isEditableFile } from "@/lib/files/editableTypes";
 import { useFileBrowserDragAndDrop } from "@/hooks/useFileBrowserDragAndDrop";
+import { collapseDuplicateFolders, dedupeByContentKey, dedupeByMessageId, folderIdForPath } from "@/lib/storage/metadataStore";
+import { isBackupItem, BACKUP_ROOT, BACKUP_ROOT_PREFIX } from "@/lib/backup/visibility";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -158,7 +161,7 @@ const fileHoverStyles: Record<string, string> = {
 
 interface FileBrowserProps {
   folderPath?: string;
-  mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived";
+  mode?: "drive" | "starred" | "recent" | "trash" | "search" | "archived" | "backups";
   searchQuery?: string;
 }
 
@@ -234,6 +237,17 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   const [deleteTarget, setDeleteTarget] = useState<TeleFile | null>(null);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
+  // Progressive render limit for memory & DOM performance on large directories
+  const INITIAL_RENDER_LIMIT = 80;
+  const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_LIMIT);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 300) {
+      setRenderLimit((prev) => prev + 50);
+    }
+  }, []);
+
   // Update current folder path in store on mount/change
   useEffect(() => {
     if (mode === "drive") {
@@ -263,14 +277,47 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     [mode, sortBy],
   );
 
+  useEffect(() => {
+    setRenderLimit(INITIAL_RENDER_LIMIT);
+  }, [folderPath, mode, filterType, searchQuery, activeSortBy]);
+
   const activeFiles = useMemo(
-    () => files.filter((file) => !file.trashed && !file.archived),
-    [files],
+    () =>
+      files
+        .filter((file) => !file.trashed && !file.archived)
+        // Backup items (files AND their reconstructed parent folder entries)
+        // live under `/TeleDrive Backups/<device>/...`. Hide them from every
+        // mode EXCEPT the dedicated `backups` view — keeps My Drive /
+        // Recent / Starred / Archived / Search free of backup noise even
+        // if the user stars or otherwise interacts with a backup entry.
+        // See src/lib/backup/visibility.ts for the predicate.
+        .filter((file) => mode === "backups" || !isBackupItem(file)),
+    [files, mode],
+  );
+
+  /**
+   * Render-layer dedup. Even though `metadataStore.healAndSave` collapses
+   * duplicates on cold start, the in-memory `state.files` can still contain
+   * folder duplicates between cold starts because:
+   *   - `setRemoteDelta` only calls `dedupeByMessageId` (skips folders).
+   *   - `loadIndexIncremental` doesn't call any folder-collapse helper.
+   *   - The user-visible `createFolder` path uses random ids, not the
+   *     canonical `folderIdForPath`, so a folder can exist under both ids.
+   *
+   * Without this pass, two folder entries with the same full path but
+   * different ids render as two separate cards (each keyed by `folder.id`).
+   * The fix mirrors `healAndSave`: dedupeByMessageId → dedupeByContentKey
+   * → collapseDuplicateFolders. The output `useMemo`s downstream stay
+   * structurally the same; only the input is cleaner.
+   */
+  const dedupedActiveFiles = useMemo(
+    () => collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(activeFiles))),
+    [activeFiles],
   );
 
   const folderEntriesIndex = useMemo(() => {
     const index = new Map<string, TeleFile[]>();
-    for (const file of activeFiles) {
+    for (const file of dedupedActiveFiles) {
       const bucket = index.get(file.folderPath);
       if (bucket) {
         bucket.push(file);
@@ -279,7 +326,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       }
     }
     return index;
-  }, [activeFiles]);
+  }, [dedupedActiveFiles]);
 
   // Compute ONLY the slice that the current `mode` actually needs.
 // Previously this allocated four filtered arrays eagerly (starred/recent/
@@ -292,25 +339,109 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       case "drive":
         return folderEntriesIndex.get(folderPath) ?? EMPTY_FILES;
       case "starred":
-        return activeFiles.filter((file) => file.starred);
+        return dedupedActiveFiles.filter((file) => file.starred);
       case "recent":
-        return activeFiles;
+        return dedupedActiveFiles;
       case "trash":
-        return files.filter((file) => file.trashed);
+        // Trash bypasses `activeFiles` (it deliberately keeps trashed
+        // items), so apply the backup-exclusion filter inline to keep
+        // the leak-stop uniform across modes. The `mode === "backups"`
+        // branch below handles its own slice, so by construction this
+        // case only runs when the user is on the Trash view, where
+        // backups should still be hidden.
+        return files.filter(
+          (file) => file.trashed && !isBackupItem(file),
+        );
       case "archived":
         return files.filter((file) => file.archived && !file.trashed);
+      case "backups":
+        // Drive-style bucket lookup at `folderPath`. The reconstructor
+        // creates parent folder entries on bootstrap, so the direct-
+        // child bucket is normally enough — and lets us keep the
+        // folder-as-card UX that matches My Drive.
+        //
+        // IMPORTANT: do NOT `.filter(isBackupItem)` the bucket here.
+        // The device folder entry that lives at `folderPath ===
+        // "/TeleDrive Backups"` exactly (no trailing slash) is
+        // legitimately a backup item, and an earlier version of this
+        // predicate used a strict `.startsWith("/TeleDrive Backups/")`
+        // that silently stripped it. The `activeFiles` slice above
+        // already drops non-backup entries for non-backups modes, so
+        // nothing non-backup should reach this branch — and if any
+        // did, `dedupedActiveFiles` is already the trimmed set.
+        //
+        // Fallback: if the direct-child bucket is empty BUT there ARE
+        // backup items somewhere under `folderPath`, the user's
+        // localStorage cache must be missing the intermediate folder
+        // entries (cold-start race or older pre-reconstructor cache).
+        // Walk descendants and synthesise one folder entry per
+        // immediate child segment, so the user can still drill into
+        // their backups instead of seeing an empty listing.
+        {
+          const direct = folderEntriesIndex.get(folderPath);
+          if (direct && direct.length > 0) {
+            return direct;
+          }
+          const prefix = folderPath.endsWith("/") ? folderPath : `${folderPath}/`;
+          const descendants = dedupedActiveFiles.filter(
+            (f) => isBackupItem(f) && f.folderPath.startsWith(prefix),
+          );
+          if (descendants.length === 0) return EMPTY_FILES;
+          // Synthesise immediate-child folder entries by collecting
+          // the first path segment after `prefix` for every
+          // descendant. Files whose own folderPath === folderPath
+          // (i.e. they live directly in this folder) are passed
+          // through verbatim.
+          const synthMap = new Map<string, TeleFile>();
+          const directChildren: TeleFile[] = [];
+          for (const f of descendants) {
+            if (f.folderPath === folderPath) {
+              directChildren.push(f);
+              continue;
+            }
+            const rest = f.folderPath.substring(prefix.length);
+            const seg = rest.split("/")[0];
+            if (!seg) continue;
+            if (!synthMap.has(seg)) {
+              synthMap.set(seg, {
+                // Synthetic folder — id derived from the full path so
+                // it survives a reconstructMissingFolders pass later
+                // without colliding with the real folder entry.
+                id: folderIdForPath(`${folderPath}/${seg}`),
+                name: seg,
+                size: 0,
+                mime: "inode/directory",
+                folderPath,
+                messageId: 0,
+                channelId: f.channelId,
+                uploadedAt: f.uploadedAt,
+                starred: false,
+                trashed: false,
+                archived: false,
+              });
+            }
+          }
+          // Stable alphabetical sort so the synthesised listing
+          // doesn't shuffle between renders. Direct files are also
+          // folded in so the user sees files-in-folder alongside
+          // folders-in-folder (matching the native folder browser).
+          const folders = Array.from(synthMap.values()).sort((a, b) =>
+            a.name.localeCompare(b.name),
+          );
+          return [...folders, ...directChildren];
+        }
       default:
-        // search mode — fuzzySearch handles its own filtering; pass activeFiles.
-        return activeFiles;
+        // search mode — fuzzySearch handles its own filtering; pass dedupedActiveFiles.
+        return dedupedActiveFiles;
     }
-  }, [mode, folderEntriesIndex, folderPath, activeFiles, files]);
+  }, [mode, folderEntriesIndex, folderPath, dedupedActiveFiles, files]);
 
   // Full filtered + sorted display list — optimized for folder navigation
   const { displayFiles, folders, regularFiles } = useMemo(() => {
     let filtered: TeleFile[];
 
     if (mode === "search") {
-      filtered = fuzzySearch(activeFiles, searchQuery);
+      filtered = fuzzySearch(dedupedActiveFiles, searchQuery);
     } else {
       // Always copy before sorting so we never mutate the bucket arrays
       // inside folderEntriesIndex (which are themselves memoized; mutating
@@ -354,10 +485,39 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       folders: nextFolders,
       regularFiles: nextRegularFiles,
     };
-  }, [activeFiles, activeSortBy, filterType, indexedFiles, mode, searchQuery]);
+  }, [dedupedActiveFiles, activeSortBy, filterType, indexedFiles, mode, searchQuery]);
 
-  // Breadcrumbs — only recompute when folderPath changes
+  // Breadcrumbs — only recompute when folderPath/mode change.
+  // For `mode === "backups"` the link prefix is the Backups route so the
+  // user stays inside the Backups view while drilling down. The first
+  // crumb is always "Backups" and links back to /drive/backups (the
+  // device-root listing).
   const breadcrumbs = useMemo(() => {
+    if (mode === "backups") {
+      // At the Backups root we don't emit any crumbs — the hardcoded
+      // "Backups" link is rendered just above the breadcrumb map, and
+      // emitting another "Backups" crumb here would print
+      // "Backups > Backups" in the trail. Empty array suppresses the
+      // extra chevron + pill.
+      if (!folderPath || folderPath === "/TeleDrive Backups") {
+        return [];
+      }
+      // segments[0] is the literal "TeleDrive Backups" — the synthetic
+      // namespace root. The hardcoded "Backups" link above represents
+      // it, so we skip it and start building crumbs from segments[1]
+      // (the device segment) onwards.
+      const segments = folderPath.split("/").filter(Boolean);
+      const crumbs: { name: string; link: string }[] = [];
+      let accumPath = "";
+      for (let i = 1; i < segments.length; i++) {
+        accumPath += `/${segments[i]}`;
+        crumbs.push({
+          name: segments[i],
+          link: `/drive/backups/folder${accumPath}`,
+        });
+      }
+      return crumbs;
+    }
     if (folderPath === "/") return [];
     const segments = folderPath.split("/").filter(Boolean);
     let accumPath = "";
@@ -365,7 +525,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       accumPath += `/${seg}`;
       return { name: seg, link: `/drive/folder${accumPath}` };
     });
-  }, [folderPath]);
+  }, [folderPath, mode]);
 
   // Header title — only recompute when mode/folderPath/searchQuery change
   const headerTitle = useMemo(() => {
@@ -374,6 +534,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       case "recent": return "Recent";
       case "trash": return "Trash";
       case "archived": return "Archived";
+      case "backups":
+        // The Backups view is rooted at `/TeleDrive Backups/<device>/...`,
+        // so render the device segment as the header. Falls back to the
+        // generic "Backups" label when the user is at the top level.
+        if (folderPath === "/TeleDrive Backups") return "Backups";
+        if (folderPath && folderPath.startsWith("/TeleDrive Backups/")) {
+          const segments = folderPath.split("/").filter(Boolean);
+          return segments[segments.length - 1] || "Backups";
+        }
+        return "Backups";
       case "search": return `Search results for "${searchQuery}"`;
       default:
         if (folderPath !== "/") {
@@ -423,11 +593,32 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
     if (isDir) {
       clearSelection();
-      navigate(`/drive/folder${file.folderPath === "/" ? "" : file.folderPath}/${file.name}`);
+      const fullPath = file.folderPath === "/" ? `/${file.name}` : `${file.folderPath}/${file.name}`;
+      // Backups folders live under `/TeleDrive Backups/...`; route them
+      // through the dedicated Backups sub-route so the user stays in
+      // the read-only Backups view rather than landing on a 404.
+      //
+      // The wildcard after `/drive/backups/folder/` carries the path
+      // RELATIVE to BACKUP_ROOT — e.g. `Mac (macOS)/Documents`, not the
+      // full `/TeleDrive Backups/Mac (macOS)/Documents`. BackupsFolderPage
+      // prepends BACKUP_ROOT when reconstructing the folderPath, so a
+      // duplicated prefix here would produce a non-existent bucket and
+      // the user would see an empty listing.
+      if (mode === "backups") {
+        const relative =
+          fullPath === BACKUP_ROOT
+            ? ""
+            : fullPath.startsWith(BACKUP_ROOT_PREFIX)
+            ? fullPath.substring(BACKUP_ROOT_PREFIX.length)
+            : fullPath.replace(/^\/+/, "");
+        navigate(`/drive/backups/folder${relative ? `/${relative}` : ""}`);
+      } else {
+        navigate(`/drive/folder${fullPath}`);
+      }
     } else {
       toastPreview(file);
     }
-  }, [clearSelection, navigate, toastPreview]);
+  }, [clearSelection, navigate, toastPreview, mode]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
@@ -547,6 +738,11 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       title = "No search results";
       subtitle = `We couldn't find any items matching "${searchQuery}".`;
       Icon = FolderOpen;
+    } else if (mode === "backups") {
+      title = "No backups yet";
+      subtitle =
+        "Pick a folder on this Mac in Settings → Plan & Devices, then run a backup. Mirrored files will appear here.";
+      Icon = Shield;
     } else if (folderPath !== "/") {
       title = "This folder is empty";
       subtitle = "Upload files or create folders in this directory.";
@@ -599,23 +795,37 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-850 dark:text-slate-100">
             {headerTitle}
           </h1>
-          {mode === "drive" && breadcrumbs.length > 0 && (
+          {(mode === "drive" || mode === "backups") && breadcrumbs.length > 0 && (
             <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto whitespace-nowrap py-1">
-              <Link
-                to="/drive/my-drive"
-                onClick={clearSelection}
-                onDragOver={(e) => handleDragOverCard(e, "crumb_home")}
-                onDrop={(e) => handleDrop(e, "/")}
-                data-drop-path="/"
-                className={cn(
-                  "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
-                  isDraggingActive && "pointer-events-none-children",
-                  dragOverId === "crumb_home" && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
-                )}
-              >
-                <Home className="h-3.5 w-3.5 shrink-0" />
-                <span>My Drive</span>
-              </Link>
+              {mode === "drive" ? (
+                <Link
+                  to="/drive/my-drive"
+                  onClick={clearSelection}
+                  onDragOver={(e) => handleDragOverCard(e, "crumb_home")}
+                  onDrop={(e) => handleDrop(e, "/")}
+                  data-drop-path="/"
+                  className={cn(
+                    "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                    isDraggingActive && "pointer-events-none-children",
+                    dragOverId === "crumb_home" && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
+                  )}
+                >
+                  <Home className="h-3.5 w-3.5 shrink-0" />
+                  <span>My Drive</span>
+                </Link>
+              ) : (
+                <Link
+                  to="/drive/backups"
+                  onClick={clearSelection}
+                  className={cn(
+                    "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                    isDraggingActive && "pointer-events-none-children",
+                  )}
+                >
+                  <Shield className="h-3.5 w-3.5 shrink-0" />
+                  <span>Backups</span>
+                </Link>
+              )}
 
               {breadcrumbs.map((crumb, idx) => (
                 <div key={crumb.link} className="flex items-center gap-1 shrink-0">
@@ -628,12 +838,30 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       <Link
                         to={crumb.link}
                         onClick={clearSelection}
-                        onDragOver={(e) => handleDragOverCard(e, `crumb_${crumb.link}`)}
-                        onDrop={(e) => {
-                          const targetPath = crumb.link.substring("/drive/folder".length);
+                        onDragOver={mode !== "backups" ? (e) => handleDragOverCard(e, `crumb_${crumb.link}`) : undefined}
+                        onDrop={mode !== "backups" ? (e) => {
+                          // Drive-mode breadcrumbs use `/drive/folder/...`,
+                          // backups-mode breadcrumbs use `/drive/backups/folder/...`.
+                          // Strip the correct prefix to get the inner folderPath
+                          // that `handleDrop` (the move-multiple-files hook)
+                          // expects.
+                          const drivePrefix = "/drive/folder";
+                          const backupsPrefix = "/drive/backups/folder";
+                          let targetPath: string;
+                          if (crumb.link.startsWith(backupsPrefix)) {
+                            targetPath = crumb.link.substring(backupsPrefix.length);
+                          } else {
+                            targetPath = crumb.link.substring(drivePrefix.length);
+                          }
                           handleDrop(e, targetPath);
-                        }}
-                        data-drop-path={crumb.link.substring("/drive/folder".length) || "/"}
+                        } : undefined}
+                        data-drop-path={
+                          mode === "backups"
+                            ? undefined
+                            : ((crumb.link.startsWith("/drive/backups/folder")
+                              ? crumb.link.substring("/drive/backups/folder".length)
+                              : crumb.link.substring("/drive/folder".length)) || "/")
+                        }
                         className={cn(
                           "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
                           isDraggingActive && "pointer-events-none-children",
@@ -720,6 +948,27 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           </Button>
         </div>
       </div>
+
+      {/* Read-only banner — shown only on the Backups view. Backups are
+          immutable snapshots of the user's chosen local folders, so all
+          the New Folder / Upload / Trash / Move affordances are hidden.
+          This banner makes that contract explicit so the user doesn't
+          wonder why those controls are missing. */}
+      {mode === "backups" && (
+        <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl border border-emerald-200/70 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 text-xs text-emerald-900 dark:text-emerald-200 shrink-0">
+          <Shield className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex-1 min-w-0 leading-relaxed">
+            <p className="font-bold">Backups are read-only.</p>
+            <p className="mt-0.5 text-emerald-900/80 dark:text-emerald-300/80">
+              To change which folders are backed up, open{" "}
+              <span className="font-mono text-[11px] bg-emerald-100/70 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">
+                Settings → Plan &amp; Devices
+              </span>
+              .
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filters and Sorting Sub-Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 py-1.5 shrink-0 select-none">
@@ -810,15 +1059,16 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           className="flex-1 overflow-y-auto min-h-0 select-none pb-20 pr-1 space-y-8"
           onDragOver={handleGlobalDragOver}
           onDrop={handleGlobalDrop}
+          onScroll={handleScroll}
         >
           {/* Folders Section */}
           {folders.length > 0 && (
             <div className="space-y-3">
               <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                Folders
+                Folders {folders.length > renderLimit && `(${Math.min(folders.length, renderLimit)} of ${folders.length})`}
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 px-1 py-1 overflow-visible">
-                {folders.map((folder, index) => {
+                {folders.slice(0, renderLimit).map((folder, index) => {
                   const isSelected = selectedIdsSet.has(folder.id);
                   const isBeingDragged = draggedId !== null && (draggedId === folder.id || (isSelected && selectedIdsSet.has(draggedId)));
                   return (
@@ -892,10 +1142,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           {regularFiles.length > 0 && (
             <div className="space-y-3">
               <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                Files
+                Files {regularFiles.length > renderLimit && `(${Math.min(regularFiles.length, renderLimit)} of ${regularFiles.length})`}
               </span>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {regularFiles.map((file, index) => {
+                {regularFiles.slice(0, renderLimit).map((file, index) => {
                   const isSelected = selectedIdsSet.has(file.id);
                   const iconType = getFileIconType(file.name, file.mime);
                   const hoverClass = fileHoverStyles[iconType] || fileHoverStyles.file;
@@ -984,6 +1234,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 shadow-xs"
           onDragOver={handleGlobalDragOver}
           onDrop={handleGlobalDrop}
+          onScroll={handleScroll}
         >
           <table className="w-full text-left border-collapse">
             <thead>
@@ -1010,7 +1261,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               </tr>
             </thead>
             <tbody>
-              {displayFiles.map((file, index) => {
+              {displayFiles.slice(0, renderLimit).map((file, index) => {
                 const isSelected = selectedIdsSet.has(file.id);
                 const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
                 

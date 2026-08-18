@@ -97,7 +97,19 @@ const getInitialFiles = (): TeleFile[] => {
   }
 };
 
-const SNAPSHOT_RING_LIMIT = 10;
+let cacheTimeout: ReturnType<typeof setTimeout> | null = null;
+const debouncedCacheFiles = (files: TeleFile[]) => {
+  if (cacheTimeout) clearTimeout(cacheTimeout);
+  cacheTimeout = setTimeout(() => {
+    try {
+      localStorage.setItem("teledrive_cached_files", JSON.stringify(files));
+    } catch (err) {
+      console.warn("[fileStore] Failed to cache files to localStorage:", err);
+    }
+  }, 300);
+};
+
+const SNAPSHOT_RING_LIMIT = 3;
 
 export const useFileStore = create<FileState>((set, get) => ({
   files: getInitialFiles(),
@@ -118,11 +130,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   lastRemoteSyncAt: null,
   lastBackupAt: null,
   setFiles: (files) => {
-    try {
-      localStorage.setItem("teledrive_cached_files", JSON.stringify(files));
-    } catch (err) {
-      console.warn("[fileStore] Failed to cache files to localStorage:", err);
-    }
+    debouncedCacheFiles(files);
     set({ files });
   },
   setSyncing: (isSyncing) => set({ isSyncing }),
@@ -194,16 +202,20 @@ export const useFileStore = create<FileState>((set, get) => ({
    */
   setRemoteDelta: async (remoteFiles: TeleFile[]) => {
     if (remoteFiles.length === 0) return;
-    const { dedupeByMessageId } = await import("../lib/storage/metadataStore");
+    const { dedupeByMessageId, collapseDuplicateFolders } = await import(
+      "../lib/storage/metadataStore"
+    );
     set((state) => {
-      const merged = dedupeByMessageId([...state.files, ...remoteFiles]);
-      // Cheap O(n) early-out: same sorted id set ⇒ nothing actually changed.
+      // Same dedup chain as healAndSave (metadataStore.ts). Previously this
+      // only called dedupeByMessageId, which SKIPS folders — so two folder
+      // entries with the same full path but different ids (one created on
+      // device A with `folder_<hash>`, one created on device B with a
+      // random id) both ended up in the in-memory store and the renderer
+      // showed them as two cards.
+      const merged = collapseDuplicateFolders(dedupeByMessageId([...state.files, ...remoteFiles]));
+      // Cheap O(n) early-out: same length ⇒ nothing actually changed.
       if (merged.length === state.files.length) return state;
-      try {
-        localStorage.setItem("teledrive_cached_files", JSON.stringify(merged));
-      } catch (err) {
-        console.warn("[fileStore] Failed to cache files to localStorage:", err);
-      }
+      debouncedCacheFiles(merged);
       return {
         files: merged,
         lastRemoteSyncAt: Date.now(),

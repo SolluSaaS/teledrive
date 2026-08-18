@@ -23,6 +23,12 @@ dist-ssr
 *.sln
 *.sw?
 
-# TeleDrive Compiled installers
+# Environment & local files
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.claude/
+vault_state.log
 buildfiles/
 

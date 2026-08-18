@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import BackupSection from "@/components/settings/BackupSection";
+import ActivitySection from "@/components/settings/ActivitySection";
 import {
   Dialog,
   DialogContent,
@@ -296,8 +297,20 @@ export default function PlanSection() {
         )}
       </Card>
 
-      {/* Pro-only feature: live multi-device sync + scheduled backup. */}
-      <BackupSection />
+      {/* Pro-only features: live multi-device sync, scheduled backup, and
+          unified activity timeline. Per the project decision, Pro-only
+          sections render for FREE users as completely empty space — no
+          banner, no placeholder, no scheduler UI. The internal amber
+          banners inside BackupSection / ActivitySection stay as
+          defense-in-depth for any future direct import, but they will
+          never be reached for FREE users because PlanSection gates the
+          render above. */}
+      {plan === "PRO" && (
+        <>
+          <BackupSection />
+          <ActivitySection />
+        </>
+      )}
 
       <UpgradeModal open={upgradeOpen} onOpenChange={setUpgradeOpen} />
 

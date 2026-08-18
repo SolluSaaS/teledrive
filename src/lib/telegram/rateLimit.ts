@@ -13,7 +13,14 @@
  * capped at FLOOD_WAIT_CAP_SECONDS so we never freeze the UI on a 300s wait.
  */
 
-export const FLOOD_WAIT_CAP_SECONDS = 60;
+/**
+ * Cap on a single FLOOD_WAIT backoff. Telegram can demand 300s+; we
+ * refuse to block the UI for that long. With the cap, a retry cycle
+ * stays under FLOOD_WAIT_CAP_SECONDS × maxAttempts (worst case 30s × 5
+ * = 150s per chunk), and the per-batch breather in the runner kicks
+ * in once Telegram stops demanding a wait.
+ */
+export const FLOOD_WAIT_CAP_SECONDS = 30;
 
 /**
  * Returns the FLOOD_WAIT delay (in seconds) Telegram is asking for, or null
@@ -131,6 +138,26 @@ export function computeRetryDelay(attempt: number, err: any): number {
 }
 
 /**
+ * Callback signature for retry events. Fired once per attempt that
+ * will be retried (i.e. not on the final attempt or on success). Used
+ * by the uploader to surface "Retrying 3/5 (FLOOD_WAIT 30s)" to the
+ * progress store, so the BackupProgressOverlay can show the user the
+ * upload is making progress instead of looking stuck.
+ */
+export type TelegramRetryEvent = {
+  /** 1-indexed attempt number that just failed. */
+  attempt: number;
+  /** Total attempts allowed. */
+  maxAttempts: number;
+  /** Milliseconds we are about to wait before the next attempt. */
+  waitMs: number;
+  /** Telegram's FLOOD_WAIT, if this retry was triggered by one. */
+  floodSeconds: number | null;
+  /** The error that just failed. */
+  error: any;
+};
+
+/**
  * Run `fn` with Telegram-aware retry semantics.
  *
  * - Transient errors (FLOOD_WAIT, timeout, network) → wait the right amount, retry.
@@ -138,12 +165,17 @@ export function computeRetryDelay(attempt: number, err: any): number {
  *
  * @param fn           The async operation to run.
  * @param label        Used in thrown error messages so we know which call failed.
- * @param maxAttempts  Cap on total attempts. Defaults to 10.
+ * @param maxAttempts  Cap on total attempts. Defaults to 5.
+ * @param onRetry      Optional callback fired once per transient error
+ *                     that will be retried. The BackupProgressOverlay
+ *                     uses this to show "Retrying 3/5 (FLOOD_WAIT 30s)"
+ *                     instead of a frozen progress bar.
  */
 export async function withTelegramRetry<T>(
   fn: () => Promise<T>,
   label: string,
-  maxAttempts: number = 10
+  maxAttempts: number = 5,
+  onRetry?: (event: TelegramRetryEvent) => void
 ): Promise<T> {
   let lastErr: any = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -166,6 +198,13 @@ export async function withTelegramRetry<T>(
         `[${label}] transient error (attempt ${attempt}/${maxAttempts}); waiting ${Math.round(delay / 100) / 10}s →`,
         err?.message ?? err
       );
+      onRetry?.({
+        attempt,
+        maxAttempts,
+        waitMs: delay,
+        floodSeconds: parseFloodWaitSeconds(err),
+        error: err,
+      });
       await new Promise((r) => setTimeout(r, delay));
     }
   }

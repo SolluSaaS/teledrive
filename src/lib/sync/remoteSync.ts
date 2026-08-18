@@ -20,6 +20,7 @@ import { loadIndexIncremental } from "../storage/metadataStore";
 import { withTelegramRetry } from "../telegram/rateLimit";
 import { useFileStore } from "../../stores/fileStore";
 import type { Plan } from "../api/types";
+import { logEvent } from "../events";
 
 const POLL_INTERVAL_MS = 30_000;
 const SYNC_INDICATOR_MIN_MS = 800;
@@ -64,6 +65,10 @@ async function runOneTick(channelId: string, plan: Plan): Promise<boolean> {
     if (result.files.length > 0) {
       await useFileStore.getState().setRemoteDelta(result.files);
       mergedAny = true;
+      logEvent({
+        type: "sync.remoteDelta",
+        payload: { fileCount: result.files.length, highestMsgId: result.highestMsgId },
+      });
     }
 
     if (result.highestMsgId > lastMsgId) {

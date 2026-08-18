@@ -65,8 +65,23 @@ export default function RemoteSyncOrchestrator(): null {
   // Effect 3 — react to auth + bootstrap + plan changes. Start the
   // remote sync loop when all pre-conditions are met; stop on any
   // pre-condition failing.
+  //
+  // Multi-device sync is a Pro-only feature. The runtime check inside
+  // `remoteSync.startRemoteSync` also enforces `plan !== "PRO"` (see
+  // `src/lib/sync/remoteSync.ts:142`), but we gate at the orchestrator
+  // too so the polling loop never even initializes for FREE users. This
+  // is belt-and-braces: if a future refactor moves the plan check out
+  // of `remoteSync.ts`, the orchestrator still refuses to start the
+  // loop. The `stopRemoteSync()` on the FREE branch also tears down any
+  // in-flight loop the instant a Pro user's plan flips back to FREE
+  // (e.g. subscription lapse) so polling stops immediately rather than
+  // waiting for the next tick.
   useEffect(() => {
     if (!isAuthenticated || !bootstrapComplete) {
+      stopRemoteSync();
+      return;
+    }
+    if (plan !== "PRO") {
       stopRemoteSync();
       return;
     }

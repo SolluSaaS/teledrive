@@ -46,6 +46,19 @@ const EDIT_TIMEOUT_MS = 8000;
 const PIN_TIMEOUT_MS = 4000;
 const DELETE_TIMEOUT_MS = 5000;
 
+/**
+ * Cap on transient (FLOOD_WAIT / timeout / network) retries before the
+ * queue gives up and surfaces a hard error. The previous design retried
+ * forever, which manifested as a stuck "Retrying in 30s" pill on the
+ * topbar during FLOOD_WAIT storms and silently held the user's
+ * optimistic state without ever confirming persistence. With this cap,
+ * after 5 transient failures the queue rejects the entry — `useFileActions`
+ * rolls back the optimistic state, the topbar shows "Save failed", and
+ * the user can hit the manual retry button to try again with a fresh
+ * budget.
+ */
+const MAX_TRANSIENT_RETRIES = 5;
+
 interface QueueEntry {
   state: TeleFile[];
   /** Resolve handler for the caller of `enqueue`. */
@@ -209,13 +222,20 @@ class ChannelQueue {
           const entry = this.retryingEntry ?? this.pending!;
           this.retryingEntry = null;
           this.pending = null;
-          this.retryAttempt = 0;
+          // NOTE: retryAttempt is intentionally NOT reset here. It must
+          // accumulate across transient failures so the cap below actually
+          // fires. The previous code reset it to 0 on every drain iteration,
+          // which made the cap unreachable and let a stuck queue retry
+          // forever. Reset only on success (line 218) or hard error.
           this.lastError = null;
           this.updateStoreState();
 
           try {
             await this.commitOnce(entry.state);
             entry.resolve();
+            // Reset retry counter on success — fresh attempt budget for the
+            // next entry.
+            this.retryAttempt = 0;
           } catch (err: any) {
             this.lastError = err;
             if (isHardError(err)) {
@@ -225,7 +245,11 @@ class ChannelQueue {
               this.updateStoreState();
               return;
             }
-            // Transient: stay optimistic, schedule retry, hold the entry.
+            // Transient: scheduleRetry increments retryAttempt internally
+            // and may itself trigger a drain when the timer fires. We do
+            // NOT increment here — that would double-count. The cap is
+            // checked inside scheduleRetry so we surface "Save failed"
+            // before firing yet another doomed retry.
             this.retryingEntry = entry;
             this.scheduleRetry(err);
             return;
@@ -248,8 +272,38 @@ class ChannelQueue {
       this.retryCountdownTimer = null;
     }
 
-    const delayMs = computeRetryDelay(this.retryAttempt, err);
+    // Increment BEFORE computing the delay so the cap is correct.
     this.retryAttempt++;
+
+    // If we've burned the retry budget, give up. Surface a hard error to
+    // the caller so the optimistic state rolls back (if any) and the UI
+    // shows "Save failed" with a manual retry button — instead of an
+    // invisible infinite-loop retry the user can't act on.
+    if (this.retryAttempt > MAX_TRANSIENT_RETRIES) {
+      const wrapped = new Error(
+        `Index save failed after ${MAX_TRANSIENT_RETRIES} transient retries: ${
+          err?.message ?? String(err)
+        }`
+      );
+      void invoke("log_vault_state", {
+        state: `INDEX_QUEUE_GIVE_UP retries=${MAX_TRANSIENT_RETRIES} last_err=${
+          err?.message ?? String(err)
+        }`,
+      }).catch(() => {});
+      // Reject the entry that was being retried. Caller's `applyOptimistic`
+      // catches this and rolls back the optimistic state — the user sees
+      // their action "fail" cleanly instead of silently bouncing back.
+      if (this.retryingEntry) {
+        const entry = this.retryingEntry;
+        this.retryingEntry = null;
+        this.retryAttempt = 0;
+        entry.reject(wrapped);
+      }
+      this.updateStoreState();
+      return;
+    }
+
+    const delayMs = computeRetryDelay(this.retryAttempt, err);
 
     const deadline = Date.now() + delayMs;
     // Update countdown every 500ms so the UI can show "Retrying in 12s".

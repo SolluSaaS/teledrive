@@ -12,6 +12,9 @@ import StarredPage from "./pages/StarredPage";
 import TrashPage from "./pages/TrashPage";
 import ArchivedPage from "./pages/ArchivedPage";
 import SearchPage from "./pages/SearchPage";
+import BackupsPage from "./pages/BackupsPage";
+import BackupsFolderPage from "./pages/BackupsFolderPage";
+import RequirePro from "./components/auth/RequirePro";
 
 // Lazy pages
 const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
@@ -184,6 +187,13 @@ function App() {
             <Route path="archived" element={<ArchivedPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="folder/*" element={<DriveBrowserPage />} />
+            {/* Device-backup entry points — Pro-only. RequirePro redirects
+                FREE users to /drive/my-drive with a one-shot toast. The root
+                shows every device's backup tree; the wildcard sub-route
+                handles drilling into a specific
+                /TeleDrive Backups/<device>/<inner> path. */}
+            <Route path="backups" element={<RequirePro><BackupsPage /></RequirePro>} />
+            <Route path="backups/folder/*" element={<RequirePro><BackupsFolderPage /></RequirePro>} />
           </Route>
 
           {/* Settings protected route */}
