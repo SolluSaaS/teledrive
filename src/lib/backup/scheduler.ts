@@ -6,7 +6,8 @@
  * When the timer fires, it emits a `teledrive://backup-tick` Tauri event
  * into the webview. This module:
  *   1. Forwards interval changes to Rust.
- *   2. Listens for tick events and dispatches them to `takeSnapshot`.
+ *   2. Listens for tick events and dispatches them to `runBackup` (the
+ *      real device-backup orchestrator in `./runner`).
  *   3. Surfaces status to the React layer (currently via fileStore).
  *
  * The interval value is the source of truth in `licenseStore.license.
@@ -14,15 +15,21 @@
  * `setProSchedule` updates both the backend AND triggers
  * `applyIntervalChange(intervalMinutes)` here so the timer restarts with
  * the new value.
+ *
+ * Replaces the previous "metadata-only snapshot" pipeline. The old
+ * `takeSnapshot` is preserved in `./snapshot` for the historical audit
+ * trail (the text-message breadcrumb it posts is still useful as a
+ * timestamped marker in the channel), but it is no longer the active
+ * "what runs when the timer fires" path. That's `runBackup` now — it
+ * actually walks source folders and uploads real files.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { takeSnapshot } from "./snapshot";
-import { getStorageChannelId } from "../telegram/channelManager";
+import { runBackup } from "./runner";
 import { useAuthStore } from "@/stores/authStore";
 import { useFileStore } from "@/stores/fileStore";
+import { useBackupProgressStore } from "@/stores/backupProgressStore";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
 
 let tickUnlisten: UnlistenFn | null = null;
 let currentIntervalMinutes: number | null = null;
@@ -84,71 +91,87 @@ export async function stopBackupSchedule(): Promise<void> {
 }
 
 /**
- * Tick handler. Called by the Tauri event listener. Looks up the
- * authenticated channel id, sets the indicator, runs the snapshot, then
- * clears the indicator.
+ * Tick handler. Called by the Tauri event listener. Runs the real device
+ * backup (walker → manifest diff → incremental upload → audit row).
+ *
+ * Pipes progress into the singleton progress store so the bottom-right
+ * overlay can render the run regardless of whether the user is on the
+ * Settings page or browsing files.
+ *
+ * The runner itself surfaces most user-facing errors (no folders, PRO
+ * gate, channel not ready). If the runner is mid-flight when another
+ * tick fires, the runner's internal guards (e.g. concurrent signal) mean
+ * the second tick will still proceed but might overlap — that's fine for
+ * v1 because the manifest writes are sequential per-file.
  */
 async function onTick(): Promise<void> {
   const setIndexQueueState = useFileStore.getState().setIndexQueueState;
-  const phone = useAuthStore.getState().phoneNumber;
-  let channelId: string | undefined;
-  try {
-    channelId = await getStorageChannelId(phone);
-  } catch (err) {
-    console.warn("[backup.scheduler] getStorageChannelId failed:", err);
-  }
-  if (!channelId) {
-    toast.warning("Scheduled backup skipped", {
-      description: "Storage channel is not ready yet. Backup will retry next tick.",
-    });
-    return;
-  }
-
+  const start = useBackupProgressStore.getState().start;
+  const setProgress = useBackupProgressStore.getState().setProgress;
+  const finish = useBackupProgressStore.getState().finish;
   setIndexQueueState("backup-running");
+  start("auto");
   try {
-    const result = await takeSnapshot(channelId, "auto");
-    if (result.messageId) {
-      toast.success("Backup complete", {
-        description: `${result.fileCount} file${result.fileCount === 1 ? "" : "s"} snapshot saved.`,
-      });
-    } else {
-      toast.error("Backup failed", {
-        description: "See the Plan & Devices page for details.",
-      });
-    }
+    const result = await runBackup({
+      triggeredBy: "auto",
+      onProgress: (p) => setProgress(p),
+    });
+    finish({
+      filesUploaded: result.filesUploaded,
+      filesSkipped: result.filesSkipped,
+      filesFailed: result.filesFailed,
+      status: result.status,
+      error: result.error,
+    });
+  } catch (err) {
+    console.warn("[backup.scheduler] onTick failed:", err);
+    finish({
+      filesUploaded: 0,
+      filesSkipped: 0,
+      filesFailed: 0,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
   } finally {
     setIndexQueueState("idle");
   }
+  // `useAuthStore` was previously used to resolve the phone for
+  // getStorageChannelId; the runner handles channel resolution itself.
+  void useAuthStore;
 }
 
 /**
- * Manually trigger a snapshot right now (the "Run now" button).
- * Doesn't interact with the timer — just runs one snapshot synchronously.
+ * Manually trigger a backup right now (the "Run now" button).
+ * Doesn't interact with the timer — just runs the real device-backup
+ * orchestrator synchronously. Progress is piped into the overlay store.
  */
-export async function runBackupNow(): Promise<{ messageId: number | null; fileCount: number }> {
-  const phone = useAuthStore.getState().phoneNumber;
-  const channelId = await getStorageChannelId(phone);
-  if (!channelId) {
-    toast.error("Storage channel not ready", {
-      description: "Please complete first login before running a backup.",
-    });
-    return { messageId: null, fileCount: 0 };
-  }
-
+export async function runBackupNow(): Promise<void> {
   const setIndexQueueState = useFileStore.getState().setIndexQueueState;
+  const start = useBackupProgressStore.getState().start;
+  const setProgress = useBackupProgressStore.getState().setProgress;
+  const finish = useBackupProgressStore.getState().finish;
   setIndexQueueState("backup-running");
+  start("manual");
   try {
-    const result = await takeSnapshot(channelId, "manual");
-    if (result.messageId) {
-      toast.success("Backup complete", {
-        description: `${result.fileCount} file${result.fileCount === 1 ? "" : "s"} snapshot saved.`,
-      });
-    } else {
-      toast.error("Backup failed", {
-        description: "The Telegram send did not complete. See vault_state.log for details.",
-      });
-    }
-    return { messageId: result.messageId, fileCount: result.fileCount };
+    const result = await runBackup({
+      triggeredBy: "manual",
+      onProgress: (p) => setProgress(p),
+    });
+    finish({
+      filesUploaded: result.filesUploaded,
+      filesSkipped: result.filesSkipped,
+      filesFailed: result.filesFailed,
+      status: result.status,
+      error: result.error,
+    });
+  } catch (err) {
+    finish({
+      filesUploaded: 0,
+      filesSkipped: 0,
+      filesFailed: 0,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
   } finally {
     setIndexQueueState("idle");
   }

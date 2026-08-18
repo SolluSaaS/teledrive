@@ -23,6 +23,8 @@ import {
   listDevices,
   revokeDevice,
   patchMe,
+  setProBackupFolders as setProBackupFoldersApi,
+  type BackupFoldersPayload,
 } from '@/lib/api';
 import type {
   Device,
@@ -62,6 +64,12 @@ interface LicenseState {
   activeDevices: Device[];
   deviceLimit: number;
   canActivateDevice: boolean;
+  /**
+   * Pro-only: user's device-backup source folder configuration.
+   * Server-authoritative (User.backupFolders) so multi-device stays in sync.
+   * Defaulted to empty until the next /api/auth/verify or refresh.
+   */
+  backupFolders: BackupFoldersPayload;
   // ── Connectivity ──
   backendReachable: boolean;
   // ── Race guard ──
@@ -102,6 +110,13 @@ interface LicenseState {
    * so the UI reflects the new value immediately (no refetch needed).
    */
   setProSchedule: (intervalMinutes: number | null) => Promise<void>;
+  /**
+   * Update the user's device-backup source-folders list. Pro-only;
+   * backend enforces 403 if the user is not PRO. The change is
+   * persisted server-side AND mirrored into the in-memory
+   * `backupFolders` field so the UI reflects the new value immediately.
+   */
+  setProBackupFolders: (folders: BackupFoldersPayload) => Promise<void>;
 }
 
 /**
@@ -109,7 +124,7 @@ interface LicenseState {
  */
 function applyProjection(
   set: (partial: Partial<LicenseState>) => void,
-  projection: VerifyResponse,
+  projection: VerifyResponse & { backupFolders?: BackupFoldersPayload },
 ): void {
   set({
     plan: projection.plan,
@@ -117,6 +132,7 @@ function applyProjection(
     activeDevices: projection.activeDevices ?? [],
     deviceLimit: projection.deviceLimit,
     canActivateDevice: projection.canActivateDevice,
+    backupFolders: projection.backupFolders ?? { paths: [], excludes: [] },
     backendReachable: true,
   });
 }
@@ -157,6 +173,7 @@ export const useLicenseStore = create<LicenseState>((set, get) => ({
   activeDevices: [],
   deviceLimit: 1,
   canActivateDevice: true,
+  backupFolders: { paths: [], excludes: [] },
   backendReachable: false,
   inFlightVerify: null,
 
@@ -352,6 +369,56 @@ export const useLicenseStore = create<LicenseState>((set, get) => ({
     }
   },
 
+  setProBackupFolders: async (folders) => {
+    // Defensive client-side shape check — the backend will also validate,
+    // but early-rejection gives a clearer toast.
+    if (
+      !Array.isArray(folders.paths) ||
+      !Array.isArray(folders.excludes) ||
+      folders.paths.length > 5 ||
+      folders.excludes.length > 20 ||
+      folders.paths.some((p) => typeof p !== 'string' || p.length === 0 || p.length > 256) ||
+      folders.excludes.some((p) => typeof p !== 'string' || p.length === 0 || p.length > 128)
+    ) {
+      toast.error('Invalid backup folder list', {
+        description: 'Pick up to 5 source folders and 20 exclude patterns.',
+      });
+      return;
+    }
+    if (get().plan !== 'PRO') {
+      toast.error('Pro feature', {
+        description: 'Device backup is available on the Pro plan. Upgrade to enable.',
+      });
+      return;
+    }
+    try {
+      const updated = await setProBackupFoldersApi(folders);
+      // Mirror the response (which includes the echoed `backupFolders`)
+      // into the store so the UI updates without a refetch.
+      const next = (updated as { backupFolders?: BackupFoldersPayload }).backupFolders;
+      set({ backupFolders: next ?? { paths: [], excludes: [] } });
+      const total = (next?.paths.length ?? 0) + (next?.excludes.length ?? 0);
+      if (total > 0) {
+        toast.success('Backup folders saved', {
+          description: `${next?.paths.length ?? 0} folder${(next?.paths.length ?? 0) === 1 ? '' : 's'}, ${next?.excludes.length ?? 0} exclude${(next?.excludes.length ?? 0) === 1 ? '' : 's'}.`,
+        });
+      } else {
+        toast.success('Backup folders cleared');
+      }
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      const message = err instanceof Error ? err.message : String(err);
+      if (status === 403) {
+        toast.error('Pro feature', {
+          description: message || 'Device backup is available on the Pro plan.',
+        });
+      } else {
+        toast.error('Could not save backup folders', { description: message });
+      }
+      throw err;
+    }
+  },
+
   logoutFromBackend: async () => {
     // Best-effort: try to revoke the current device row, then wipe the JWT.
     // We don't currently identify our own device id without the hashed ID
@@ -405,6 +472,7 @@ export function __resetLicenseStoreForTests(): void {
     activeDevices: [],
     deviceLimit: 1,
     canActivateDevice: true,
+    backupFolders: { paths: [], excludes: [] },
     backendReachable: false,
     inFlightVerify: null,
   });

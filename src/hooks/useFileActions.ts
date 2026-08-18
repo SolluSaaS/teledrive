@@ -1,6 +1,7 @@
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../lib/secure/vault";
 import {
   deleteTelegramMessage,
+  folderIdForPath,
   fullPathForFolder,
   findFoldersByPath,
 } from "../lib/storage/metadataStore";
@@ -196,6 +197,19 @@ if (typeof window !== "undefined") {
   // Expose a tiny dev hook so the diagnostics page can force a retry.
   (window as any).__teledriveRetryIndex = (channelId: string) =>
     retryQueue(channelId);
+
+  // Emergency gate release. If bootstrap ever wedges past its safety nets
+  // (Tauri IPC deadlock, hung GramJS request, etc.), the user can open
+  // DevTools and run `__teledriveForceBootstrapComplete()` to flip the gate
+  // so drag/drop/rename/delete work again. This should never normally need
+  // to run — the dead-man switch in bootstrap.ts handles it — but it's a
+  // cheap last-resort escape hatch.
+  (window as any).__teledriveForceBootstrapComplete = () => {
+    useFileStore.getState().setBootstrapComplete(true);
+    console.warn(
+      "[teledrive] bootstrapComplete forced to true via dev hook — gate bypassed"
+    );
+  };
 }
 
 export function useFileActions() {
@@ -239,7 +253,13 @@ export function useFileActions() {
       }
 
       const newFolder: TeleFile = {
-        id: Math.random().toString(36).substring(2, 11),
+        // Deterministic id keyed on the full path. Mirrors the canonical
+        // scheme used by `reconstructMissingFolders` in metadataStore.ts —
+        // every cold start computing this folder arrives at the same id,
+        // so the dedup pass on recovery (collapseDuplicateFolders) does not
+        // see two different ids for the same path. A random id here would
+        // create one entry per cold start with no way to dedupe later.
+        id: folderIdForPath(newFullPath),
         name: trimmed,
         size: 0,
         mime: "inode/directory",

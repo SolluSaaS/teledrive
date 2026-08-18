@@ -4,12 +4,22 @@ import tailwindcss from "@tailwindcss/vite";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "path";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss(), nodePolyfills()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    nodePolyfills({
+      include: ["buffer", "events", "stream", "util", "crypto", "path", "os", "process"],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -25,8 +35,13 @@ export default defineConfig(async () => ({
           if (id.includes("node_modules/@codemirror") || id.includes("node_modules/@lezer")) {
             return "codemirror-vendor";
           }
-          // Telegram MTProto client — large, rarely changes
-          if (id.includes("node_modules/@mtcute") || id.includes("node_modules/mtcute")) {
+          // Telegram MTProto client + polyfills (Buffer, big-integer, etc.)
+          if (
+            id.includes("node_modules/telegram") ||
+            id.includes("node_modules/node-stdlib-browser") ||
+            id.includes("node_modules/buffer") ||
+            id.includes("node_modules/big-integer")
+          ) {
             return "telegram-vendor";
           }
           // React core — tiny but changes often break caching if mixed

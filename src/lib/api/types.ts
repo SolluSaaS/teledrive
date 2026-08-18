@@ -159,6 +159,14 @@ export interface LoginResponse {
   activeDevices: Device[];
   deviceLimit: number;
   canActivateDevice: boolean;
+  /**
+   * Pro-only: user's device-backup source-folder configuration. Returned
+   * by /api/auth/login AND /api/auth/verify so the licenseStore's
+   * `applyProjection` can re-hydrate the list on every session start and
+   * every refresh — without this the list appears to "vanish" because the
+   * fallback in applyProjection is an empty array.
+   */
+  backupFolders?: { paths: string[]; excludes: string[] };
 }
 
 /** Response from /api/auth/verify. Same shape as LoginResponse minus jwt. */

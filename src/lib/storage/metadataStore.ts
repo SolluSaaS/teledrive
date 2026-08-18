@@ -71,6 +71,55 @@ export function dedupeByMessageId(files: TeleFile[]): TeleFile[] {
 }
 
 /**
+ * Deduplicates a file list by CONTENT KEY (folderPath::name::size).
+ *
+ * This catches the case where `dedupeByMessageId` cannot help: a backup
+ * retry that succeeds the second time after the first Telegram response
+ * was lost produces two REAL Telegram messages with different messageIds
+ * for the same logical file. Without this pass, both stay in the store
+ * and the user sees the same backup file twice in the file browser.
+ *
+ * Tie-break for content-key ties: prefer the entry with the larger
+ * `uploadedAt` (last write wins). If equal, prefer the larger
+ * `messageId` (higher Telegram messageId = newer Telegram message).
+ *
+ * Folders are skipped — folder dedup is owned by `collapseDuplicateFolders`
+ * (it needs the parent path, which `name` alone doesn't carry).
+ */
+export function dedupeByContentKey(files: TeleFile[]): TeleFile[] {
+  const byContentKey = new Map<string, TeleFile>();
+  const folders: TeleFile[] = [];
+  for (const f of files) {
+    if (!f.messageId || f.messageId === 0 || isFolderMime(f.mime)) {
+      folders.push(f);
+      continue;
+    }
+    // Use the FOLDER PATH the file lives in (not getFolderFullPath — that's
+    // for folders). Two files in the same folder with the same name and size
+    // are still considered duplicates here: this collapses backup retries
+    // and concurrent uploads of the same source file.
+    const parent = !f.folderPath || f.folderPath === "/" ? "" : f.folderPath.replace(/\/+$/, "");
+    const key = `${parent}::${f.name}::${f.size}`;
+    const existing = byContentKey.get(key);
+    if (!existing) {
+      byContentKey.set(key, f);
+      continue;
+    }
+    // Last-write-wins; tie-break by larger messageId (newer Telegram msg).
+    const newer =
+      f.uploadedAt > existing.uploadedAt
+        ? f
+        : f.uploadedAt < existing.uploadedAt
+        ? existing
+        : f.messageId > existing.messageId
+        ? f
+        : existing;
+    byContentKey.set(key, newer);
+  }
+  return [...folders, ...byContentKey.values()];
+}
+
+/**
  * Collapses duplicate folder entries to a single canonical entry per full
  * path. Keeps the existing entry with the LOWEST id (deterministic across
  * cold starts — id sort is stable for ties, and `healed_*` / `folder_*` /
@@ -246,14 +295,23 @@ export function reconstructMissingFolders(
     }
   }
 
-  const reconstructedFolders: TeleFile[] = [];
-  let changed = false;
-
+  // Collect every distinct folderPath that needs ancestor walking. Walking
+  // every file's path independently was O(N × depth) — for a 218-file
+  // backup all sitting under /TeleDrive Backups/<device>/Documents/Work/
+  // Reports/2026, we'd split "Work", "Reports", "2026" 218 times for no
+  // benefit. Pre-deduping cuts this to one walk per unique path.
+  const distinctPaths = new Set<string>();
   for (const f of files) {
     if (f.trashed || f.archived) continue;
     const path = f.folderPath;
     if (!path || path === "/") continue;
+    distinctPaths.add(path);
+  }
 
+  const reconstructedFolders: TeleFile[] = [];
+  let changed = false;
+
+  for (const path of distinctPaths) {
     const segments = path.split("/").filter(Boolean);
     let currentParent = "/";
 
@@ -301,7 +359,14 @@ async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFi
   // random metadata. Doing it this way means duplicate folders from previous
   // cold starts collapse to one canonical entry before they hit the queue.
   const { healedFiles, changed } = reconstructMissingFolders(files, channelId);
-  const cleaned = collapseDuplicateFolders(dedupeByMessageId(healedFiles));
+  // Order: dedupeByMessageId → dedupeByContentKey → collapseDuplicateFolders.
+  // - dedupeByMessageId handles single-message races (same Telegram message
+  //   represented twice).
+  // - dedupeByContentKey handles retry pairs (two distinct Telegram messages
+  //   for the same logical file — see T1.3 in the Tier 1 plan).
+  // - collapseDuplicateFolders finally handles folder-entry duplicates by
+  //   full path.
+  const cleaned = collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(healedFiles)));
   if (changed || cleaned.length !== files.length) {
     console.log(
       `[metadataStore] Healed ${changed ? "folders" : ""}${changed && cleaned.length !== files.length ? " + " : ""}${
@@ -425,8 +490,8 @@ export function findMostRecentCoherentEpoch(
 /**
  * Picks the most-recent fully-coherent set of index chunks from a list of
  * Telegram messages. Groups by totalChunks, finds the latest complete
- * epoch in each group, then picks the set with the highest minimum
- * message id (tie-break by totalChunks for granularity).
+ * epoch in each group, then picks the set with the LARGEST totalChunks
+ * (tie-break by highest minimum message id).
  *
  * Returns the chosen set's ParsedIndexChunks (sorted by chunkIndex),
  * or null if no coherent set exists.
@@ -447,21 +512,33 @@ export function pickCoherentIndexSet(
     else byTotal.set(p.totalChunks, [p]);
   }
 
+  // Selection rule (Tier 1 fix — T1.2):
+  //   1. Among complete epochs, prefer the LARGEST `totalChunks`. A
+  //      freshly-recovered 4-chunk index reflects more of the user's files
+  //      than a stale 1-chunk post-recovery user action.
+  //   2. Tie-break by the HIGHEST minimum message id — newer Telegram
+  //      message ids (within a tie on totalChunks) are the more recent
+  //      save epoch.
+  //
+  // Rationale for the size-wins rule: the queue always writes the FULL
+  // state, so a user action after recovery generates a complete snapshot
+  // that the bootstrap layer eventually picks up. A 1-chunk set is almost
+  // always stale relative to a 4-chunk set.
   let best: ParsedIndexChunk[] | null = null;
+  let bestTotal = -1;
   let bestMinId = -Infinity;
-  let bestTotal = 0;
   for (const [, chunks] of byTotal) {
     const coherent = findMostRecentCoherentEpoch(chunks);
     if (!coherent) continue;
+    const total = coherent[0]?.totalChunks ?? 0;
     const minId = coherent.reduce(
       (m, c) => Math.min(m, c.msgId),
       Infinity
     );
-    const total = coherent[0]?.totalChunks ?? 0;
-    if (minId > bestMinId || (minId === bestMinId && total > bestTotal)) {
+    if (total > bestTotal || (total === bestTotal && minId > bestMinId)) {
       best = coherent;
-      bestMinId = minId;
       bestTotal = total;
+      bestMinId = minId;
     }
   }
   return best;
@@ -536,7 +613,10 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
     for (const c of allParsed) {
       for (const f of c.files) byId.set(f.id, f);
     }
-    return healAndSave(channelId, collapseDuplicateFolders(dedupeByMessageId(Array.from(byId.values()))));
+    return healAndSave(
+      channelId,
+      collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(Array.from(byId.values()))))
+    );
   }
 
   // Merge chosen set into a single TeleFile list, deduping by id.
@@ -546,7 +626,10 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       byId.set(f.id, f);
     }
   }
-  return healAndSave(channelId, collapseDuplicateFolders(dedupeByMessageId(Array.from(byId.values()))));
+  return healAndSave(
+    channelId,
+    collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(Array.from(byId.values()))))
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,14 @@
 import { Api } from "telegram";
 import { getClient } from "./client";
-import { open as tauriOpen, SeekMode } from "@tauri-apps/plugin-fs";
+// NOTE: we deliberately do NOT import @tauri-apps/plugin-fs here. Its
+// `open()` is gated by capability scopes (`fs:allow-open` etc.) — those
+// scopes are baked at build time and can't accept the user's arbitrary
+// backup source folders. For file-path inputs we read chunks via a Rust
+// command (`read_file_chunk`) which has full filesystem access because
+// Tauri Rust commands are not subject to the JS plugin-fs scope.
 import bigInt from "big-integer";
 import { Buffer } from "buffer";
+import { invoke } from "@tauri-apps/api/core";
 import { withTimeout } from "../storage/metadataStore";
 import { withTelegramRetry } from "./rateLimit";
 
@@ -15,6 +21,22 @@ interface UploadProgressCallback {
 }
 
 /**
+ * Optional callback fired when a chunk or the finalize step is about
+ * to be retried. The backup runner wires this to the progress store
+ * so the user sees "Retrying 3/5 — waiting 30s" in the overlay
+ * instead of a frozen counter. Optional because the regular upload
+ * path doesn't have a progress store equivalent.
+ */
+export type UploadRetryCallback = (event: {
+  attempt: number;
+  maxAttempts: number;
+  waitMs: number;
+  floodSeconds: number | null;
+  label: string;
+  error: any;
+}) => void;
+
+/**
  * Uploads a file (either from local native path or browser File object) to Telegram storage channel.
  * Returns the message object representing the uploaded file document.
  */
@@ -24,7 +46,8 @@ export async function uploadFileToTelegram(
   fileSize: number,
   filePathOrFile: string | File,
   folderPath: string = "/",
-  onProgress?: UploadProgressCallback
+  onProgress?: UploadProgressCallback,
+  onRetry?: UploadRetryCallback,
 ): Promise<any> {
   const client = getClient();
   
@@ -33,31 +56,39 @@ export async function uploadFileToTelegram(
   
   const isBig = fileSize > 10 * 1024 * 1024; // > 10MB is considered big in MTProto
   const totalParts = Math.ceil(fileSize / CHUNK_SIZE);
-  
-  let tauriFileHandle: any = null;
-  
+
+  const isPathInput = typeof filePathOrFile === "string";
+
   try {
-    if (typeof filePathOrFile === "string") {
-      // Initialize Tauri file handle for streaming
-      tauriFileHandle = await tauriOpen(filePathOrFile, { read: true });
-    }
-    
     // Upload chunks sequentially
     for (let partIndex = 0; partIndex < totalParts; partIndex++) {
       const start = partIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, fileSize);
       const currentChunkSize = end - start;
-      
+
       let chunkBytes: Uint8Array;
-      
-      if (tauriFileHandle) {
-        // Read chunk using Tauri native file handle
-        await tauriFileHandle.seek(start, SeekMode.Start);
-        const buffer = new Uint8Array(currentChunkSize);
-        await tauriFileHandle.read(buffer);
-        chunkBytes = buffer;
+
+      if (isPathInput) {
+        // Read the chunk via the Rust command. This bypasses the JS
+        // plugin-fs scope restrictions (capability files) which would
+        // otherwise reject arbitrary user-picked backup source folders.
+        // The Rust side has full filesystem access; we just stream the
+        // requested byte range back as a Vec<u8>.
+        const rawRes = await invoke<ArrayBuffer | Uint8Array | number[]>("read_file_chunk", {
+          path: filePathOrFile as string,
+          offset: start,
+          length: currentChunkSize,
+        });
+        if (rawRes instanceof Uint8Array) {
+          chunkBytes = rawRes;
+        } else if (rawRes instanceof ArrayBuffer) {
+          chunkBytes = new Uint8Array(rawRes);
+        } else {
+          chunkBytes = new Uint8Array(rawRes);
+        }
       } else {
-        // Read chunk from HTML File object
+        // Read chunk from HTML File object (regular user upload path —
+        // file is in the browser's File API, no Rust needed).
         const blobSlice = (filePathOrFile as File).slice(start, end);
         const arrayBuffer = await blobSlice.arrayBuffer();
         chunkBytes = new Uint8Array(arrayBuffer);
@@ -66,6 +97,7 @@ export async function uploadFileToTelegram(
       // Upload part through the shared retry helper. The chunk is re-read
       // from disk on each attempt via the closure — important because the
       // seek/read may have advanced the handle position mid-failure.
+      const chunkLabel = `${isBig ? "SaveBigFilePart" : "SaveFilePart"}(${partIndex}/${totalParts})`;
       await withTelegramRetry(
         () =>
           withTimeout(
@@ -86,11 +118,22 @@ export async function uploadFileToTelegram(
                   })
                 ),
             CHUNK_TIMEOUT_MS,
-            `${isBig ? "SaveBigFilePart" : "SaveFilePart"}(${partIndex}/${totalParts})`
+            chunkLabel
           ),
-        `${isBig ? "SaveBigFilePart" : "SaveFilePart"}(${partIndex}/${totalParts})`,
-        // Cap at 8 attempts per chunk — 8 × 60s worst case before failing.
-        8
+        chunkLabel,
+        // Cap at 5 attempts per chunk — 5 × 30s (FLOOD_WAIT_CAP) = 150s
+        // worst case before failing. Combined with the per-batch
+        // breather in the runner, persistent rate limits surface as
+        // file failures (visible in the overlay) rather than 8-minute
+        // stalls.
+        5,
+        onRetry
+          ? (e) =>
+              onRetry({
+                ...e,
+                label: chunkLabel,
+              })
+          : undefined,
       );
       
       // Update progress
@@ -119,6 +162,7 @@ export async function uploadFileToTelegram(
     // uploaded to Telegram at this point, so the only failure modes here are
     // transient network/rate-limit issues.
     const caption = `teledrive_file:${JSON.stringify({ folder: folderPath })}`;
+    const finalizeLabel = "client.sendFile";
     const result = await withTelegramRetry(
       () =>
         withTimeout(
@@ -128,20 +172,25 @@ export async function uploadFileToTelegram(
             caption,
           }),
           SENDFILE_TIMEOUT_MS,
-          "client.sendFile"
+          finalizeLabel
         ),
-      "client.sendFile",
-      5
+      finalizeLabel,
+      // Finalize cap: 3 attempts × 30s = 90s worst case. The chunks
+      // are already on Telegram, so a 90s wait is plenty.
+      3,
+      onRetry
+        ? (e) =>
+            onRetry({
+              ...e,
+              label: finalizeLabel,
+            })
+        : undefined,
     );
     
     return result;
-  } finally {
-    if (tauriFileHandle) {
-      try {
-        await tauriFileHandle.close();
-      } catch (e) {
-        console.warn("Failed to close Tauri file handle:", e);
-      }
-    }
+  } catch (err) {
+    // No file handle to close — we read each chunk via a fresh Rust
+    // command invocation, which has its own open/read/close lifecycle.
+    throw err;
   }
 }

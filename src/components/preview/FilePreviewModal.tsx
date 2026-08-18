@@ -561,9 +561,21 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         );
 
         if (isTextMime || isEditableFile(file)) {
-          let text = new TextDecoder().decode(buffer);
+          // Guard for massive text files (> 3MB) to prevent editor memory exhaustion
+          const MAX_TEXT_PREVIEW_BYTES = 3 * 1024 * 1024;
+          let isTruncated = false;
+          let sliceBuffer = buffer;
+          if (buffer.length > MAX_TEXT_PREVIEW_BYTES) {
+            sliceBuffer = buffer.subarray(0, MAX_TEXT_PREVIEW_BYTES);
+            isTruncated = true;
+          }
+
+          let text = new TextDecoder().decode(sliceBuffer);
           // Normalize line endings to LF (\n) to ensure consistent line counting and rendering
           text = text.replace(/\r\n|\r/g, "\n");
+          if (isTruncated) {
+            text += "\n\n--- [Preview truncated: File exceeds 3MB limit] ---";
+          }
           if (!current) return;
           setTextContent(text);
 
@@ -577,8 +589,13 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             setIsEditMode(true);
           }
         } else {
-          const blob = new Blob([buffer], { type: file.mime });
-          if (current) setContentUrl(URL.createObjectURL(blob));
+          const blob = new Blob([buffer.buffer as ArrayBuffer], { type: file.mime });
+          if (current) {
+            setContentUrl((prev) => {
+              if (prev) URL.revokeObjectURL(prev);
+              return URL.createObjectURL(blob);
+            });
+          }
         }
       } catch (err: any) {
         if (current) {
@@ -593,10 +610,18 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       }
     })();
 
-    return () => { current = false; };
+    return () => {
+      current = false;
+    };
   }, [file]);
 
-  useEffect(() => () => { if (contentUrl) URL.revokeObjectURL(contentUrl); }, [contentUrl]);
+  useEffect(() => {
+    return () => {
+      if (contentUrl) {
+        URL.revokeObjectURL(contentUrl);
+      }
+    };
+  }, [contentUrl]);
 
   // ── Handlers (memoized) ──────────────────────────────────────────────────
   const handleDownload = useCallback(() => {

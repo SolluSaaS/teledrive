@@ -13,13 +13,16 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
+import { isBackupItem } from "@/lib/backup/visibility";
 import { triggerFilePicker, triggerFolderPicker } from "@/lib/upload/fileSelector";
 import { addFilesToUploadQueue } from "@/lib/upload/uploadManager";
 import { UploadProgressPanel } from "@/components/upload/UploadProgressPanel";
+import { BackupProgressOverlay } from "@/components/backup/BackupProgressOverlay";
 import { downloadFileFromTelegram } from "@/lib/telegram/downloader";
 import { FilePreviewModal } from "@/components/preview/FilePreviewModal";
 import { TeleFile } from "@/lib/types";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useIsPro } from "@/hooks/useIsPro";
 import {
   Dialog,
   DialogContent,
@@ -371,6 +374,11 @@ export default function DriveLayout() {
 
   const formattedUsedSize = formatBytes(totalSizeBytes);
 
+  // Pro-only features (Backups sidebar entry, brand text) flip reactively
+  // on plan changes. The selector hook re-renders the layout whenever the
+  // Razorpay webhook succeeds and `plan` flips from FREE → PRO.
+  const isPro = useIsPro();
+
   // Extract phone initials (e.g. "+91 9876..." -> "+9")
   const getInitials = (phone: string | null) => {
     if (!phone) return "TD";
@@ -381,11 +389,12 @@ export default function DriveLayout() {
     return cleaned.slice(0, 2).toUpperCase() || "TD";
   };
 
-  const { archivedCount, starredCount, trashCount, totalCount } = useMemo(() => {
+  const { archivedCount, starredCount, trashCount, totalCount, backupCount } = useMemo(() => {
     let archived = 0;
     let starred = 0;
     let trash = 0;
     let total = 0;
+    let backup = 0;
 
     for (const file of files) {
       if (file.trashed) {
@@ -398,6 +407,16 @@ export default function DriveLayout() {
         continue;
       }
 
+      if (isBackupItem(file)) {
+        // Mirror the badge semantics used by the other sidebar entries:
+        // count non-trashed backup files. Folder entries inside the
+        // backup namespace are included so the badge reflects the
+        // total navigable count, matching the way My Drive counts
+        // its subfolders + files together.
+        backup += 1;
+        continue;
+      }
+
       total += 1;
       if (file.starred) starred += 1;
     }
@@ -407,16 +426,38 @@ export default function DriveLayout() {
       starredCount: starred,
       trashCount: trash,
       totalCount: total,
+      backupCount: backup,
     };
   }, [files]);
 
-  const navItems = useMemo(() => [
-    { label: "My Drive",  icon: HardDrive, path: "/drive/my-drive",  badge: totalCount, dropTarget: "nav:/drive/my-drive" },
-    { label: "Recent",   icon: Clock,      path: "/drive/recent", dropTarget: null },
-    { label: "Starred",  icon: Star,       path: "/drive/starred",   badge: starredCount, dropTarget: "nav:/drive/starred" },
-    { label: "Archived", icon: Archive,    path: "/drive/archived",  badge: archivedCount, dropTarget: "nav:/drive/archived" },
-    { label: "Trash",    icon: Trash2,     path: "/drive/trash",     badge: trashCount, dropTarget: "nav:/drive/trash" },
-  ], [archivedCount, starredCount, totalCount, trashCount]);
+  const navItems = useMemo(() => {
+    const items: Array<{
+      label: string;
+      icon: typeof HardDrive;
+      path: string;
+      badge: number | null;
+      dropTarget: string | null;
+    }> = [
+      { label: "My Drive",  icon: HardDrive, path: "/drive/my-drive",  badge: totalCount, dropTarget: "nav:/drive/my-drive" },
+      { label: "Recent",   icon: Clock,      path: "/drive/recent", dropTarget: null, badge: null },
+      { label: "Starred",  icon: Star,       path: "/drive/starred",   badge: starredCount, dropTarget: "nav:/drive/starred" },
+      { label: "Archived", icon: Archive,    path: "/drive/archived",  badge: archivedCount, dropTarget: "nav:/drive/archived" },
+      { label: "Trash",    icon: Trash2,     path: "/drive/trash",     badge: trashCount, dropTarget: "nav:/drive/trash" },
+    ];
+    // Device-backup entry is Pro-only — fully hidden for FREE users
+    // (per the project decision: Pro features are not visible in the
+    // frontend for free users, not just gated with an upgrade banner).
+    // The route itself is also guarded by RequirePro in App.tsx so a
+    // direct URL still redirects to /drive/my-drive.
+    // Sits at the bottom of the personal-drive group so it reads as a
+    // sibling section rather than primary navigation. No dropTarget —
+    // backups are read-only, so internal drag-to-sidebar moves don't
+    // apply. The mobile bottom nav (lines below) reuses this array.
+    if (isPro) {
+      items.push({ label: "Backups", icon: Shield, path: "/drive/backups", badge: backupCount, dropTarget: null });
+    }
+    return items;
+  }, [archivedCount, starredCount, totalCount, trashCount, backupCount, isPro]);
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-slate-50/20 dark:bg-slate-900/5 select-none">
@@ -426,7 +467,8 @@ export default function DriveLayout() {
           const Icon = item.icon;
           const isActive =
             location.pathname === item.path ||
-            (item.path === "/drive/my-drive" && location.pathname.startsWith("/drive/folder/"));
+            (item.path === "/drive/my-drive" && location.pathname.startsWith("/drive/folder/")) ||
+            (item.path === "/drive/backups" && location.pathname.startsWith("/drive/backups"));
           return (
             <Link
               key={item.label}
@@ -543,7 +585,9 @@ export default function DriveLayout() {
                     alt="TeleDrive Logo"
                     className="h-6 w-6 object-contain rounded-lg shadow-sm"
                   />
-                  <span className="text-xl font-bold text-slate-800 dark:text-slate-200 tracking-tight">TeleDrive</span>
+                  <span className="text-xl font-bold text-slate-800 dark:text-slate-200 tracking-tight">
+                    {isPro ? "TeleDrive Pro" : "TeleDrive"}
+                  </span>
                 </div>
                 <SidebarContent />
               </SheetContent>
@@ -561,7 +605,7 @@ export default function DriveLayout() {
               />
             </div>
             <span className="hidden sm:inline-block text-lg font-extrabold tracking-tight text-slate-800 dark:text-slate-200">
-              TeleDrive
+              {isPro ? "TeleDrive Pro" : "TeleDrive"}
             </span>
           </Link>
         </div>
@@ -724,7 +768,8 @@ export default function DriveLayout() {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.path ||
-              (item.path === "/drive/my-drive" && location.pathname.startsWith("/drive/folder/"));
+              (item.path === "/drive/my-drive" && location.pathname.startsWith("/drive/folder/")) ||
+              (item.path === "/drive/backups" && location.pathname.startsWith("/drive/backups"));
             return (
               <Link
                 key={item.label}
@@ -763,6 +808,7 @@ export default function DriveLayout() {
         }}
       />
       <UploadProgressPanel />
+      <BackupProgressOverlay />
 
       {/* Mobile Floating Action Button (FAB) */}
       {isMobile && (location.pathname === "/drive/my-drive" || location.pathname.startsWith("/drive/folder/")) && (
