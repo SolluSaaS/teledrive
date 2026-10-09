@@ -39,6 +39,8 @@ export default function AboutSection() {
 
   const handleOpenLink = async (url: string) => {
     try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
       await openUrl(url);
     } catch (err) {
       console.error("Failed to open URL:", err);

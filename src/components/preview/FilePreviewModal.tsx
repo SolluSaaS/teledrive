@@ -64,6 +64,7 @@ import { SyntaxHighlighter } from "./SyntaxHighlighter";
 import { CodeEditor } from "./CodeEditor";
 import { CsvTableViewer } from "./CsvTableViewer";
 import { toast } from "sonner";
+import DOMPurify from "dompurify";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 // ─── O2 Code Editor — runnable language map ────────────────────────────────
@@ -118,15 +119,22 @@ function formatTime(seconds: number): string {
 }
 
 function sanitizeHtml(html: string): string {
-  let clean = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-  clean = clean.replace(/on\w+\s*=\s*(['"])(?:(?!\1).)*\1/gi, "");
-  clean = clean.replace(/on\w+\s*=\s*[^>\s]+/gi, "");
-  clean = clean.replace(/href\s*=\s*(['"])javascript:(?:(?!\1).)*\1/gi, 'href="#"');
-  clean = clean.replace(/src\s*=\s*(['"])javascript:(?:(?!\1).)*\1/gi, "");
-  clean = clean.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "");
-  clean = clean.replace(/<embed\b[^>]*>/gi, "");
-  clean = clean.replace(/<object\b[^>]*>/gi, "");
-  return clean;
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    ALLOWED_TAGS: [
+      "h1", "h2", "h3", "h4", "h5", "h6",
+      "p", "a", "ul", "ol", "li", "blockquote",
+      "code", "pre", "table", "thead", "tbody", "tr", "th", "td",
+      "strong", "em", "del", "hr", "br", "img", "span", "div", "sup", "sub",
+      "details", "summary", "input"
+    ],
+    ALLOWED_ATTR: [
+      "href", "src", "alt", "title", "class", "target", "rel", "type", "checked", "disabled"
+    ],
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "base", "link", "style"],
+    FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "onfocus", "onblur", "style"],
+  });
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────
@@ -1782,6 +1790,20 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
               >
                 <div
                   className="w-full max-w-4xl bg-white dark:bg-[#1e1f20] border border-[#e0e2e7] dark:border-[#333537] rounded-2xl shadow-sm p-8 md:p-14 my-auto min-h-full teledrive-markdown-body"
+                  onClick={(e) => {
+                    const target = (e.target as HTMLElement).closest("a");
+                    if (target && target.href) {
+                      e.preventDefault();
+                      try {
+                        const parsed = new URL(target.href);
+                        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+                          openUrl(target.href).catch(() => window.open(target.href, "_blank", "noopener,noreferrer"));
+                        }
+                      } catch {
+                        // ignore malformed URL
+                      }
+                    }
+                  }}
                   dangerouslySetInnerHTML={{ __html: markdownHtml ?? "" }}
                 />
               </div>

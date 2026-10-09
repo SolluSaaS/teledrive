@@ -58,8 +58,9 @@ export async function downloadFileFromTelegram(
     }
     
     // Open Tauri save dialog to let user choose target path
+    const safeFileName = fileName.replace(/[/\\?%*:|"<>]/g, "_").trim() || "download";
     const targetPath = await tauriSaveDialog({
-      defaultPath: fileName,
+      defaultPath: safeFileName,
     });
     
     if (!targetPath) {
