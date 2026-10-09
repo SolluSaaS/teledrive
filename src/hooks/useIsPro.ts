@@ -1,18 +1,10 @@
 /**
- * Single source of truth for "is this user on the Pro plan?".
+ * useIsPro — always returns true.
  *
- * Reads `plan` from the license store and returns true iff it's 'PRO'.
- * Use this hook everywhere Pro-only UI or routing decisions are needed
- * so the comparison stays consistent (no inline `plan === 'PRO'` strings
- * scattered across the codebase).
- *
- * Reactive: the hook re-renders the consumer whenever the plan flips.
- * A Razorpay webhook success flips `plan: 'FREE' → 'PRO'` via
- * `refreshBackendState()` → `applyProjection()` (see licenseStore.ts),
- * and any subscriber to this hook re-renders automatically.
+ * TeleDrive is now a fully free application. This hook previously checked
+ * the license plan; it now returns true unconditionally so that any
+ * remaining call sites get the "unlocked" path without code changes.
  */
-import { useLicenseStore } from '@/stores/licenseStore';
-
 export function useIsPro(): boolean {
-  return useLicenseStore((s) => s.plan === 'PRO');
+  return true;
 }

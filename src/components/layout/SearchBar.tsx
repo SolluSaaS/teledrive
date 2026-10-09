@@ -56,22 +56,22 @@ export default function SearchBar() {
     <div className="relative w-full">
       <form
         onSubmit={handleSubmit}
-        className={`relative flex items-center w-full h-10 transition-all duration-200 rounded-full px-4 border ${
+        className={`relative flex items-center w-full h-11 md:h-12 transition-all duration-200 rounded-full px-4.5 border ${
           isFocused
-            ? "bg-white dark:bg-slate-950 border-brand-500 shadow-md ring-2 ring-brand-500/15"
-            : "bg-slate-100 border-slate-200/60 dark:bg-slate-900/70 dark:border-slate-800/80 hover:bg-slate-200/60 dark:hover:bg-slate-900/90 hover:border-slate-300 dark:hover:border-slate-700/80 shadow-xs"
+            ? "bg-white dark:bg-[#1e1f20] border-transparent shadow-[0_1px_3px_0_rgba(60,64,67,0.3),0_4px_8px_3px_rgba(60,64,67,0.15)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.5)] ring-1 ring-black/5 dark:ring-white/10"
+            : "bg-[#edf2fc] hover:bg-[#e1e8f5] dark:bg-[#282a2c] dark:hover:bg-[#333537] border-transparent shadow-xs"
         }`}
       >
-        <Search className="h-4.5 w-4.5 text-slate-550 dark:text-slate-400 mr-2.5 shrink-0" />
+        <Search className="h-5 w-5 text-[#444746] dark:text-[#c4c7c5] mr-3 shrink-0" />
         
         <input
           type="text"
-          placeholder="Search in TeleDrive"
+          placeholder="Search in Drive"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)} // short delay to allow clicks to register
-          className="w-full h-full bg-transparent border-0 outline-none focus:outline-none focus:ring-0 px-0 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-450 dark:placeholder:text-slate-400/70"
+          className="w-full h-full bg-transparent border-0 outline-none focus:outline-none focus:ring-0 px-0 text-sm text-[#1f1f1f] dark:text-[#e3e3e3] placeholder:text-[#444746] dark:placeholder:text-[#c4c7c5]"
         />
 
         {query && (
@@ -80,20 +80,20 @@ export default function SearchBar() {
             variant="ghost"
             size="icon"
             onClick={handleClear}
-            className="h-7 w-7 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 shrink-0 ml-1"
+            className="h-7 w-7 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[#444746] hover:text-[#1f1f1f] dark:text-[#c4c7c5] dark:hover:text-[#e3e3e3] shrink-0 ml-1 cursor-pointer"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-4 w-4" />
           </Button>
         )}
       </form>
 
       {/* Inline Quick Search Results Suggestion Dropdown */}
       {isFocused && query.trim() !== "" && (
-        <div className={`absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl overflow-hidden z-50 animate-fade-in py-1 transition-opacity duration-150 ${isStale ? "opacity-60" : "opacity-100"}`}>
+        <div className={`absolute left-0 right-0 top-full mt-2 bg-white dark:bg-[#282a2c] border border-slate-200/80 dark:border-slate-800 shadow-2xl rounded-2xl overflow-hidden z-50 animate-fade-in py-1.5 transition-opacity duration-150 ${isStale ? "opacity-60" : "opacity-100"}`}>
           {quickResults.length > 0 ? (
             <div>
-              <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                Quick Matches
+              <div className="px-4 py-2 text-[11px] font-semibold text-[#444746] dark:text-[#c4c7c5] uppercase tracking-wider">
+                Matching Files &amp; Folders
               </div>
               {quickResults.map((file) => {
                 const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
@@ -103,14 +103,14 @@ export default function SearchBar() {
                     onMouseDown={(e) => e.preventDefault()} // prevent input blur from unmounting suggestions prematurely
                     onClick={() => handleQuickResultClick(file)}
                     onDoubleClick={() => handleQuickResultClick(file)}
-                    className="flex items-center gap-3 px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f0f4f9] dark:hover:bg-[#333537] cursor-pointer transition-colors"
                   >
-                    <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded bg-transparent shrink-0" />
+                    <FileIcon name={file.name} mime={file.mime} size="sm" className="p-0.5 rounded shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                      <div className="text-xs font-semibold text-[#1f1f1f] dark:text-[#e3e3e3] truncate">
                         {file.name}
                       </div>
-                      <div className="text-[9px] text-slate-400 truncate">
+                      <div className="text-[10px] text-[#444746] dark:text-[#c4c7c5] truncate">
                         {isDir ? "Folder" : `File • ${file.folderPath === "/" ? "My Drive" : file.folderPath}`}
                       </div>
                     </div>
@@ -119,8 +119,8 @@ export default function SearchBar() {
               })}
             </div>
           ) : (
-            <div className="px-4 py-3 text-xs text-center text-slate-400 dark:text-slate-500 font-medium">
-              No quick matches found
+            <div className="px-4 py-4 text-xs text-center text-[#444746] dark:text-[#c4c7c5] font-medium">
+              No matching files found
             </div>
           )}
         </div>

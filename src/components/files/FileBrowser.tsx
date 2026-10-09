@@ -40,6 +40,7 @@ import { useFileStore } from "@/stores/fileStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileActions } from "@/hooks/useFileActions";
 import { FileIcon } from "./FileIcon";
+import { FolderIcon } from "./FolderIcon";
 import { FileContextMenu } from "./FileContextMenu";
 import { FileActionsMenu } from "./FileActionsMenu";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { fuzzySearch } from "@/lib/search/searchEngine";
-import { getFileCategory, getFileIconType } from "@/lib/files/fileUtils";
+import { getFileCategory } from "@/lib/files/fileUtils";
 import { isEditableFile } from "@/lib/files/editableTypes";
 import { useFileBrowserDragAndDrop } from "@/hooks/useFileBrowserDragAndDrop";
 import { collapseDuplicateFolders, dedupeByContentKey, dedupeByMessageId, folderIdForPath } from "@/lib/storage/metadataStore";
@@ -146,18 +147,7 @@ function isDirectory(file: TeleFile): boolean {
 const EMPTY_FILES: readonly TeleFile[] = Object.freeze([]) as readonly TeleFile[];
 
 
-const fileHoverStyles: Record<string, string> = {
-  image: "hover:border-rose-300/80 dark:hover:border-rose-800/60 hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(244,63,94,0.35)]",
-  video: "hover:border-purple-300/80 dark:hover:border-purple-800/60 hover:shadow-[0_10px_20px_-10px_rgba(168,85,247,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(168,85,247,0.35)]",
-  audio: "hover:border-amber-300/80 dark:hover:border-amber-800/60 hover:shadow-[0_10px_20px_-10px_rgba(245,158,11,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(245,158,11,0.35)]",
-  pdf: "hover:border-red-300/80 dark:hover:border-red-800/60 hover:shadow-[0_10px_20px_-10px_rgba(239,68,68,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(239,68,68,0.35)]",
-  spreadsheet: "hover:border-emerald-300/80 dark:hover:border-emerald-800/60 hover:shadow-[0_10px_20px_-10px_rgba(16,185,129,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(16,185,129,0.35)]",
-  document: "hover:border-blue-300/80 dark:hover:border-blue-800/60 hover:shadow-[0_10px_20px_-10px_rgba(59,130,246,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(59,130,246,0.35)]",
-  presentation: "hover:border-orange-300/80 dark:hover:border-orange-800/60 hover:shadow-[0_10px_20px_-10px_rgba(249,115,22,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(249,115,22,0.35)]",
-  code: "hover:border-indigo-300/80 dark:hover:border-indigo-800/60 hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(99,102,241,0.35)]",
-  archive: "hover:border-yellow-300/80 dark:hover:border-yellow-800/60 hover:shadow-[0_10px_20px_-10px_rgba(234,179,8,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(234,179,8,0.35)]",
-  file: "hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-[0_10px_20px_-10px_rgba(148,163,184,0.25)] dark:hover:shadow-[0_10px_20px_-10px_rgba(148,163,184,0.35)]",
-};
+
 
 interface FileBrowserProps {
   folderPath?: string;
@@ -572,9 +562,6 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     window.dispatchEvent(new CustomEvent("teledrive-trigger-upload"));
   }, []);
 
-  const triggerFolderUpload = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("teledrive-trigger-folder-upload"));
-  }, []);
 
   const handleItemClick = useCallback((e: React.MouseEvent, file: TeleFile) => {
     if (suppressClickRef.current) {
@@ -788,15 +775,15 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   };
 
   return (
-    <div className={cn("flex flex-col h-full p-4 md:p-6 lg:p-8 space-y-6", isDraggingActive && "dragging-active")}>
-      {/* File Browser Header Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-200 dark:border-slate-800/60 pb-4 shrink-0">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-850 dark:text-slate-100">
+    <div className={cn("flex flex-col h-full p-4 md:p-6 lg:p-7 space-y-4", isDraggingActive && "dragging-active")}>
+      {/* File Browser Header Toolbar: Google Drive style */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-slate-200/70 dark:border-slate-800/60 pb-3 shrink-0">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-[#1f1f1f] dark:text-[#e3e3e3]">
             {headerTitle}
           </h1>
           {(mode === "drive" || mode === "backups") && breadcrumbs.length > 0 && (
-            <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto whitespace-nowrap py-1">
+            <div className="flex items-center gap-1.5 text-xs text-[#444746] dark:text-[#c4c7c5] overflow-x-auto whitespace-nowrap py-0.5">
               {mode === "drive" ? (
                 <Link
                   to="/drive/my-drive"
@@ -805,9 +792,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   onDrop={(e) => handleDrop(e, "/")}
                   data-drop-path="/"
                   className={cn(
-                    "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                    "flex items-center gap-1 hover:text-[#0b57d0] dark:hover:text-[#a8c7fa] transition-colors font-medium text-[#444746] dark:text-[#c4c7c5] px-1.5 py-0.5 rounded-md",
                     isDraggingActive && "pointer-events-none-children",
-                    dragOverId === "crumb_home" && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
+                    dragOverId === "crumb_home" && "bg-[#c2e7ff] text-[#001d35] dark:bg-[#004a77] dark:text-[#c2e7ff]"
                   )}
                 >
                   <Home className="h-3.5 w-3.5 shrink-0" />
@@ -818,7 +805,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                   to="/drive/backups"
                   onClick={clearSelection}
                   className={cn(
-                    "flex items-center gap-1 hover:text-brand-500 transition-colors font-medium text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
+                    "flex items-center gap-1 hover:text-[#0b57d0] dark:hover:text-[#a8c7fa] transition-colors font-medium text-[#444746] dark:text-[#c4c7c5] px-1.5 py-0.5 rounded-md",
                     isDraggingActive && "pointer-events-none-children",
                   )}
                 >
@@ -829,43 +816,38 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
               {breadcrumbs.map((crumb, idx) => (
                 <div key={crumb.link} className="flex items-center gap-1 shrink-0">
-                  <ChevronRight className="h-3 w-3 text-slate-400 shrink-0" />
+                  <ChevronRight className="h-3.5 w-3.5 text-[#747775] dark:text-[#8e918f] shrink-0" />
                   {idx === breadcrumbs.length - 1 ? (
-                    <span className="font-bold text-slate-800 dark:text-slate-200 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/80">
+                    <span className="font-semibold text-[#1f1f1f] dark:text-[#e3e3e3] px-2 py-0.5 rounded-md bg-[#f0f4f9] dark:bg-[#282a2c]">
                       {crumb.name}
                     </span>
                   ) : (
-                      <Link
-                        to={crumb.link}
-                        onClick={clearSelection}
-                        onDragOver={mode !== "backups" ? (e) => handleDragOverCard(e, `crumb_${crumb.link}`) : undefined}
-                        onDrop={mode !== "backups" ? (e) => {
-                          // Drive-mode breadcrumbs use `/drive/folder/...`,
-                          // backups-mode breadcrumbs use `/drive/backups/folder/...`.
-                          // Strip the correct prefix to get the inner folderPath
-                          // that `handleDrop` (the move-multiple-files hook)
-                          // expects.
-                          const drivePrefix = "/drive/folder";
-                          const backupsPrefix = "/drive/backups/folder";
-                          let targetPath: string;
-                          if (crumb.link.startsWith(backupsPrefix)) {
-                            targetPath = crumb.link.substring(backupsPrefix.length);
-                          } else {
-                            targetPath = crumb.link.substring(drivePrefix.length);
-                          }
-                          handleDrop(e, targetPath);
-                        } : undefined}
-                        data-drop-path={
-                          mode === "backups"
-                            ? undefined
-                            : ((crumb.link.startsWith("/drive/backups/folder")
-                              ? crumb.link.substring("/drive/backups/folder".length)
-                              : crumb.link.substring("/drive/folder".length)) || "/")
+                    <Link
+                      to={crumb.link}
+                      onClick={clearSelection}
+                      onDragOver={mode !== "backups" ? (e) => handleDragOverCard(e, `crumb_${crumb.link}`) : undefined}
+                      onDrop={mode !== "backups" ? (e) => {
+                        const drivePrefix = "/drive/folder";
+                        const backupsPrefix = "/drive/backups/folder";
+                        let targetPath: string;
+                        if (crumb.link.startsWith(backupsPrefix)) {
+                          targetPath = crumb.link.substring(backupsPrefix.length);
+                        } else {
+                          targetPath = crumb.link.substring(drivePrefix.length);
                         }
-                        className={cn(
-                          "hover:text-brand-500 transition-colors font-semibold text-slate-650 dark:text-slate-400 px-1.5 py-0.5 rounded-md transition-all",
-                          isDraggingActive && "pointer-events-none-children",
-                        dragOverId === `crumb_${crumb.link}` && "bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-2 ring-brand-500/20"
+                        handleDrop(e, targetPath);
+                      } : undefined}
+                      data-drop-path={
+                        mode === "backups"
+                          ? undefined
+                          : ((crumb.link.startsWith("/drive/backups/folder")
+                            ? crumb.link.substring("/drive/backups/folder".length)
+                            : crumb.link.substring("/drive/folder".length)) || "/")
+                      }
+                      className={cn(
+                        "hover:text-[#0b57d0] dark:hover:text-[#a8c7fa] transition-colors font-medium text-[#444746] dark:text-[#c4c7c5] px-1.5 py-0.5 rounded-md",
+                        isDraggingActive && "pointer-events-none-children",
+                        dragOverId === `crumb_${crumb.link}` && "bg-[#c2e7ff] text-[#001d35] dark:bg-[#004a77] dark:text-[#c2e7ff]"
                       )}
                     >
                       {crumb.name}
@@ -877,85 +859,38 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           )}
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto sm:mt-1">
-          {mode === "drive" && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCreateDialogOpen(true)}
-                className="h-8.5 rounded-xl text-xs gap-1.5 font-semibold border-slate-200 dark:border-slate-800"
-              >
-                <FolderPlus className="h-3.5 w-3.5 text-brand-500" />
-                <span>New Folder</span>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="h-8.5 rounded-xl text-xs bg-brand-500 hover:bg-brand-600 font-semibold gap-1.5 text-white shadow-sm cursor-pointer border-0"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    <span>Upload</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="rounded-xl p-1 bg-white dark:bg-slate-900 border dark:border-slate-200 dark:border-slate-800 shadow-lg">
-                  <DropdownMenuItem
-                    onClick={triggerUpload}
-                    className="rounded-lg text-xs font-semibold px-3 py-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <Upload className="mr-2 h-3.5 w-3.5 text-blue-500" />
-                    Upload Files
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={triggerFolderUpload}
-                    className="rounded-lg text-xs font-semibold px-3 py-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <Folder className="mr-2 h-3.5 w-3.5 text-amber-500" />
-                    Upload Folder
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
-
+        <div className="flex items-center gap-1.5 self-end sm:self-auto sm:mt-1">
           {mode === "trash" && displayFiles.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => setEmptyTrashDialogOpen(true)}
-              className="h-8.5 rounded-xl text-xs border-red-200 text-red-600 dark:border-red-950 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 font-semibold"
+              className="h-8.5 rounded-full text-xs border-red-300 text-red-600 dark:border-red-900/60 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 font-medium cursor-pointer mr-1"
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               Empty Trash
             </Button>
           )}
 
-          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
-
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
-            className="h-8.5 w-8.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
-            title={viewMode === "grid" ? "List View" : "Grid View"}
+            className="h-9 w-9 rounded-full hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] text-[#444746] dark:text-[#c4c7c5] cursor-pointer"
+            title={viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
           >
             {viewMode === "grid" ? (
-              <List className="h-4.5 w-4.5 text-slate-600 dark:text-slate-400" />
+              <List className="h-4.5 w-4.5" />
             ) : (
-              <Grid className="h-4.5 w-4.5 text-slate-600 dark:text-slate-400" />
+              <Grid className="h-4.5 w-4.5" />
             )}
           </Button>
         </div>
       </div>
 
-      {/* Read-only banner — shown only on the Backups view. Backups are
-          immutable snapshots of the user's chosen local folders, so all
-          the New Folder / Upload / Trash / Move affordances are hidden.
-          This banner makes that contract explicit so the user doesn't
-          wonder why those controls are missing. */}
+      {/* Read-only banner for Backups */}
       {mode === "backups" && (
-        <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl border border-emerald-200/70 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 text-xs text-emerald-900 dark:text-emerald-200 shrink-0">
+        <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl border border-emerald-200/80 dark:border-emerald-800/40 bg-emerald-50/70 dark:bg-emerald-950/20 text-xs text-emerald-900 dark:text-emerald-200 shrink-0">
           <Shield className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <div className="flex-1 min-w-0 leading-relaxed">
             <p className="font-bold">Backups are read-only.</p>
@@ -970,10 +905,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         </div>
       )}
 
-      {/* Filters and Sorting Sub-Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 py-1.5 shrink-0 select-none">
+      {/* Filters and Sorting: Google Drive filter chips & sort */}
+      <div className="flex flex-wrap items-center justify-between gap-3 py-0.5 shrink-0 select-none">
         {/* Category Filter Chips */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 max-w-full">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5 max-w-full">
           {["All", "Documents", "Images", "Videos", "Audio"].map((filter) => {
             const isActive = filterType === filter;
             return (
@@ -982,12 +917,13 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 type="button"
                 onClick={() => setFilterType(filter)}
                 className={cn(
-                  "px-3.5 py-1.5 text-xs font-bold rounded-full border transition-all duration-200 cursor-pointer whitespace-nowrap active:scale-95",
+                  "px-3.5 py-1.5 text-xs font-medium rounded-lg border transition-all duration-150 cursor-pointer whitespace-nowrap active:scale-95 inline-flex items-center gap-1.5",
                   isActive
-                    ? "bg-brand-500 text-white border-brand-500 shadow-xs dark:bg-brand-500/20 dark:text-brand-400 dark:border-brand-500/30"
-                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-muted-foreground hover:border-slate-300 dark:hover:border-slate-700 hover:text-foreground hover:shadow-xs"
+                    ? "bg-[#c2e7ff] text-[#001d35] border-transparent font-semibold dark:bg-[#004a77] dark:text-[#c2e7ff] shadow-xs"
+                    : "bg-white dark:bg-[#1e1f20] border-slate-300/70 dark:border-slate-700/70 text-[#444746] dark:text-[#c4c7c5] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] hover:text-[#1f1f1f] dark:hover:text-[#e3e3e3]"
                 )}
               >
+                {isActive && <Check className="h-3.5 w-3.5 text-[#001d35] dark:text-[#c2e7ff]" />}
                 {filter}
               </button>
             );
@@ -1001,7 +937,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 px-3 flex items-center gap-1.5"
+                className="h-8 rounded-lg text-xs font-medium text-[#444746] dark:text-[#c4c7c5] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700/70 px-3 flex items-center gap-1.5 cursor-pointer"
               >
                 <ArrowUpDown className="h-3.5 w-3.5" />
                 <span>Sort: {sortLabel}</span>
@@ -1009,22 +945,22 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="w-48 rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md z-50"
+              className="w-48 rounded-xl p-1 bg-white dark:bg-[#282a2c] border border-slate-200 dark:border-slate-800 shadow-xl z-50"
             >
               {[
                 { value: "name_asc", label: "Name (A to Z)" },
                 { value: "name_desc", label: "Name (Z to A)" },
-                { value: "date_desc", label: "Newest uploaded" },
-                { value: "date_asc", label: "Oldest uploaded" },
-                { value: "size_desc", label: "Size (largest)" },
-                { value: "size_asc", label: "Size (smallest)" },
+                { value: "date_desc", label: "Last modified" },
+                { value: "date_asc", label: "Earliest modified" },
+                { value: "size_desc", label: "File size (largest)" },
+                { value: "size_asc", label: "File size (smallest)" },
               ].map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => setSortBy(opt.value)}
                   className={cn(
-                    "flex items-center justify-between px-3 py-2 text-xs rounded-lg cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:bg-slate-100 dark:focus:bg-slate-800 text-slate-700 dark:text-slate-200",
-                    sortBy === opt.value && "font-bold text-brand-600 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-950/10"
+                    "flex items-center justify-between px-3 py-2 text-xs rounded-lg cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] text-[#1f1f1f] dark:text-[#e3e3e3]",
+                    sortBy === opt.value && "font-bold text-[#0b57d0] dark:text-[#a8c7fa] bg-[#c2e7ff]/30 dark:bg-[#004a77]/30"
                   )}
                 >
                   <span>{opt.label}</span>
@@ -1064,10 +1000,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           {/* Folders Section */}
           {folders.length > 0 && (
             <div className="space-y-3">
-              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+              <h2 className="text-xs font-semibold text-[#444746] dark:text-[#c4c7c5] tracking-wide block">
                 Folders {folders.length > renderLimit && `(${Math.min(folders.length, renderLimit)} of ${folders.length})`}
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 px-1 py-1 overflow-visible">
+              </h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 px-0.5">
                 {folders.slice(0, renderLimit).map((folder, index) => {
                   const isSelected = selectedIdsSet.has(folder.id);
                   const isBeingDragged = draggedId !== null && (draggedId === folder.id || (isSelected && selectedIdsSet.has(draggedId)));
@@ -1095,28 +1031,36 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         data-folder-id={folder.id}
                         style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex items-center justify-between gap-3 p-3.5 pr-3.5 rounded-xl border transition-all duration-300 ease-out cursor-pointer hover:-translate-y-0.5 select-none animate-slide-up-fade overflow-visible backdrop-blur-md",
+                          "group relative flex items-center justify-between gap-3 h-12 px-3.5 rounded-xl transition-all duration-150 cursor-pointer select-none border border-transparent hover:border-slate-300/80 dark:hover:border-slate-700/80",
                           isSelected
-                            ? "border-brand-400 bg-brand-50/45 dark:border-brand-500/80 dark:bg-brand-950/18 shadow-[0_0_0_1px_rgba(76,141,246,0.35),0_10px_24px_-18px_rgba(26,115,232,0.55)]"
+                            ? "bg-[#c2e7ff] text-[#001d35] dark:bg-[#004a77] dark:text-[#c2e7ff] font-medium shadow-xs border-transparent"
                             : dragOverId === folder.id
-                            ? "border-brand-500 bg-brand-50/60 dark:border-brand-400 dark:bg-brand-950/24 shadow-[0_0_0_2px_rgba(26,115,232,0.16),0_14px_28px_-18px_rgba(26,115,232,0.65)] -translate-y-0.5"
-                            : "border-slate-200/60 dark:border-slate-800/50 bg-white/60 dark:bg-slate-900/20 hover:border-brand-300 dark:hover:border-brand-800/80 hover:bg-white/80 dark:hover:bg-slate-900/40 hover:shadow-[0_10px_20px_-10px_rgba(26,115,232,0.18)]",
+                            ? "bg-[#c2e7ff]/60 dark:bg-[#004a77]/60 ring-2 ring-[#0b57d0]"
+                            : "bg-[#f0f4f9] dark:bg-[#282a2c] hover:bg-[#e1e7ef] dark:hover:bg-[#333537] text-[#1f1f1f] dark:text-[#e3e3e3]",
                           isBeingDragged && "opacity-40"
                         )}
                       >
-                        {/* Drop-target "+" badge — only visible while dragging over this folder */}
+                        {/* Drop-target "+" badge */}
                         {dragOverId === folder.id && isDraggingActive && (
-                          <span className="absolute -right-2.5 -top-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 shadow-[0_10px_22px_-12px_rgba(26,115,232,0.85)] ring-4 ring-white dark:ring-slate-900 pointer-events-none animate-folder-drop-badge">
-                            <Plus className="h-3.5 w-3.5 text-white" />
+                          <span className="absolute -right-2 -top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-[#0b57d0] text-white shadow-md ring-2 ring-white dark:ring-[#1e1f20] pointer-events-none animate-folder-drop-badge">
+                            <Plus className="h-3.5 w-3.5" />
                           </span>
                         )}
                         <div className="flex items-center gap-3 min-w-0 flex-1 pointer-events-none">
-                          <Folder className="h-5 w-5 text-brand-500 fill-brand-500/10 shrink-0 stroke-[1.5] transition-transform duration-300 ease-out group-hover:scale-110" />
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                          <FolderIcon
+                            size="sm"
+                            className={cn(
+                              "h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-105",
+                              isSelected
+                                ? "text-[#001d35] dark:text-[#c2e7ff]"
+                                : "text-[#444746] dark:text-[#c4c7c5]"
+                            )}
+                          />
+                          <span className="text-xs md:text-sm font-medium truncate">
                             {folder.name}
                           </span>
                         </div>
-                        <div className="shrink-0 ml-auto" data-no-drag onClick={(e) => e.stopPropagation()}>
+                        <div className="shrink-0 ml-auto opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity" data-no-drag onClick={(e) => e.stopPropagation()}>
                           <FileActionsMenu
                             file={folder}
                             onPreview={toastPreview}
@@ -1141,14 +1085,12 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
           {/* Files Section */}
           {regularFiles.length > 0 && (
             <div className="space-y-3">
-              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+              <h2 className="text-xs font-semibold text-[#444746] dark:text-[#c4c7c5] tracking-wide block">
                 Files {regularFiles.length > renderLimit && `(${Math.min(regularFiles.length, renderLimit)} of ${regularFiles.length})`}
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              </h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-4 px-0.5">
                 {regularFiles.slice(0, renderLimit).map((file, index) => {
                   const isSelected = selectedIdsSet.has(file.id);
-                  const iconType = getFileIconType(file.name, file.mime);
-                  const hoverClass = fileHoverStyles[iconType] || fileHoverStyles.file;
                   return (
                     <FileContextMenu
                       key={file.id}
@@ -1173,52 +1115,75 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         onTouchMove={handleTouchEndItem}
                         style={{ animationDelay: `${Math.min(folders.length + index, 15) * 20}ms` }}
                         className={cn(
-                          "group relative flex flex-col rounded-2xl border transition-all duration-300 ease-out cursor-pointer overflow-hidden text-left hover:-translate-y-0.5 select-none h-44 animate-slide-up-fade backdrop-blur-md",
+                          "group relative flex flex-col rounded-2xl transition-all duration-150 cursor-pointer overflow-hidden text-left select-none h-52 bg-white dark:bg-[#1e1f20] hover:bg-[#f8fafd] dark:hover:bg-[#282a2c] border border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md",
                           isSelected
-                            ? "border-brand-500 bg-brand-50/45 dark:border-brand-500/80 dark:bg-brand-950/20 shadow-[0_0_0_1px_rgba(76,141,246,0.35),0_10px_24px_-18px_rgba(26,115,232,0.55)]"
-                            : cn(
-                                "border-slate-200/60 dark:border-slate-800/50 bg-white/60 dark:bg-slate-900/20 hover:bg-white/80 dark:hover:bg-slate-900/40",
-                                hoverClass
-                              ),
+                            ? "bg-[#c2e7ff]/30 dark:bg-[#004a77]/30 ring-2 ring-[#0b57d0] dark:ring-[#a8c7fa] border-transparent shadow-xs"
+                            : "",
                           (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                         )}
                       >
-                        {/* Upper icon/preview box */}
-                        <div className="flex-1 bg-slate-50/20 dark:bg-slate-950/20 flex items-center justify-center p-4 relative border-b border-slate-100/60 dark:border-slate-800/30 pointer-events-none">
-                          <FileIcon name={file.name} mime={file.mime} size="lg" />
+                        {/* Top bar with mini typed icon, title, and action menu */}
+                        <div className="flex items-center justify-between gap-1.5 px-3.5 pt-3 pb-1 shrink-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-1 pointer-events-none">
+                            <FileIcon name={file.name} mime={file.mime} size="sm" bare className="shrink-0" />
+                            <p className="text-xs font-medium text-[#1f1f1f] dark:text-[#e3e3e3] truncate">
+                              {file.name}
+                            </p>
+                          </div>
+                          <div className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity" data-no-drag onClick={(e) => e.stopPropagation()}>
+                            <FileActionsMenu
+                              file={file}
+                              onPreview={toastPreview}
+                              onEdit={handleEdit}
+                              onDownload={handleDownload}
+                              onRename={openRenameDialog}
+                              onStarToggle={toggleStar}
+                              onTrash={moveToTrash}
+                              onDeletePermanently={setDeleteTarget}
+                              onArchive={archiveFile}
+                              onUnarchive={unarchiveFile}
+                              onOfflineToggle={toggleOffline}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Centered Preview Canvas */}
+                        <div className="flex-1 bg-[#f8fafd] dark:bg-[#131314]/80 mx-2.5 my-1 rounded-xl border border-slate-100 dark:border-slate-800/80 flex items-center justify-center relative overflow-hidden pointer-events-none">
+                          {file.thumbnailUrl ? (
+                            <img
+                              src={file.thumbnailUrl}
+                              alt={file.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-16 h-20 bg-white dark:bg-[#202124] rounded-md shadow-xs border border-slate-200/80 dark:border-slate-700/80 p-2 flex flex-col items-center justify-between pointer-events-none select-none">
+                              <div className="w-full space-y-1 mt-0.5 opacity-40">
+                                <div className="h-0.5 bg-slate-300 dark:bg-slate-600 rounded-full w-full" />
+                                <div className="h-0.5 bg-slate-300 dark:bg-slate-600 rounded-full w-4/5" />
+                                <div className="h-0.5 bg-slate-300 dark:bg-slate-600 rounded-full w-3/5" />
+                              </div>
+                              <div className="my-auto py-0.5">
+                                <FileIcon name={file.name} mime={file.mime} size="md" bare />
+                              </div>
+                              <div className="w-full space-y-1 mb-0.5 opacity-30">
+                                <div className="h-0.5 bg-slate-300 dark:bg-slate-600 rounded-full w-full" />
+                                <div className="h-0.5 bg-slate-300 dark:bg-slate-600 rounded-full w-2/3" />
+                              </div>
+                            </div>
+                          )}
+
                           {file.starred && (
-                            <Star className="absolute top-2 right-2 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                            <Star className="absolute top-2 right-2 h-4 w-4 fill-amber-400 text-amber-400 drop-shadow-xs" />
                           )}
                           {file.offline && (
-                            <CheckCircle className="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-green-500 fill-green-500/20 dark:fill-green-950/30 shrink-0" />
+                            <CheckCircle className="absolute top-2 left-2 h-4 w-4 text-emerald-500 fill-emerald-500/20 shrink-0" />
                           )}
                         </div>
 
-                        {/* Lower text & action menu info */}
-                        <div className="p-3 pr-2 relative bg-white/40 dark:bg-slate-950/25 flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1 pointer-events-none">
-                            <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                              {file.name}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {formatFileSize(file.size)}
-                            </p>
-                          </div>
-                          <div className="shrink-0" data-no-drag onClick={(e) => e.stopPropagation()}>
-                          <FileActionsMenu
-                            file={file}
-                            onPreview={toastPreview}
-                            onEdit={handleEdit}
-                            onDownload={handleDownload}
-                            onRename={openRenameDialog}
-                            onStarToggle={toggleStar}
-                            onTrash={moveToTrash}
-                            onDeletePermanently={setDeleteTarget}
-                            onArchive={archiveFile}
-                            onUnarchive={unarchiveFile}
-                            onOfflineToggle={toggleOffline}
-                          />
-                          </div>
+                        {/* Bottom details footer */}
+                        <div className="px-3.5 py-2 flex items-center justify-between text-[11px] text-[#747775] dark:text-[#8e918f] pointer-events-none shrink-0 font-normal">
+                          <span>{formatFileSize(file.size)}</span>
+                          <span>{new Date(file.uploadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
                         </div>
                       </div>
                     </FileContextMenu>
@@ -1231,15 +1196,15 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       ) : (
         /* LIST VIEW */
         <div
-          className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-slate-900/40 shadow-xs"
+          className="flex-1 overflow-y-auto min-h-0 select-none pb-20 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl bg-white dark:bg-[#1e1f20] shadow-xs"
           onDragOver={handleGlobalDragOver}
           onDrop={handleGlobalDrop}
           onScroll={handleScroll}
         >
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-150 dark:border-slate-800 text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider select-none bg-slate-50/50 dark:bg-slate-950/20">
-                <th className="py-3.5 px-4 w-12 text-center">
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-[#444746] dark:text-[#8e918f] select-none bg-slate-50/70 dark:bg-[#202124]/50">
+                <th className="py-3 px-4 w-12 text-center">
                   <input
                     type="checkbox"
                     checked={selectedIds.length === displayFiles.length && displayFiles.length > 0}
@@ -1250,14 +1215,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                         clearSelection();
                       }
                     }}
-                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500/30 dark:bg-slate-950 transition-colors cursor-pointer"
+                    className="h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 text-[#0b57d0] focus:ring-[#0b57d0]/20 dark:bg-slate-900 transition-colors cursor-pointer"
                   />
                 </th>
-                <th className="py-3.5 px-4 font-extrabold">Name</th>
-                <th className="py-3.5 px-4 hidden sm:table-cell font-extrabold">Type</th>
-                <th className="py-3.5 px-4 hidden md:table-cell font-extrabold">Size</th>
-                <th className="py-3.5 px-4 hidden lg:table-cell font-extrabold">Last Modified</th>
-                <th className="py-3.5 px-4 w-16"></th>
+                <th className="py-3 px-4 font-semibold">Name</th>
+                <th className="py-3 px-4 hidden sm:table-cell font-semibold">Type</th>
+                <th className="py-3 px-4 hidden md:table-cell font-semibold">File size</th>
+                <th className="py-3 px-4 hidden lg:table-cell font-semibold">Last modified</th>
+                <th className="py-3 px-4 w-14"></th>
               </tr>
             </thead>
             <tbody>
@@ -1290,9 +1255,9 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       {...(isDir ? { 'data-folder-id': file.id } : {})}
                       style={{ animationDelay: `${Math.min(index, 15) * 20}ms` }}
                       className={cn(
-                        "group border-b border-slate-100 dark:border-slate-800/45 hover:bg-slate-50/75 dark:hover:bg-slate-800/10 cursor-pointer transition-all duration-150 animate-slide-up-fade",
-                        isSelected && "bg-brand-50/40 dark:bg-brand-950/15",
-                        dragOverId === file.id && isDir && "bg-brand-50/70 dark:bg-brand-950/30 border-brand-500 border-2",
+                        "group border-b border-slate-100 dark:border-slate-800/50 hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer transition-colors duration-100 h-12",
+                        isSelected && "bg-[#c2e7ff]/40 dark:bg-[#004a77]/35 text-[#001d35] dark:text-[#c2e7ff]",
+                        dragOverId === file.id && isDir && "bg-[#c2e7ff]/70 dark:bg-[#004a77]/70 ring-2 ring-[#0b57d0]",
                         (draggedId !== null && (draggedId === file.id || (isSelected && selectedIdsSet.has(draggedId)))) && "opacity-40"
                       )}
                     >
@@ -1301,10 +1266,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(file.id)}
-                          className="h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-brand-500 focus:ring-brand-500/30 dark:bg-slate-950 transition-colors cursor-pointer"
+                          className="h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 text-[#0b57d0] focus:ring-[#0b57d0]/20 dark:bg-slate-900 transition-colors cursor-pointer"
                         />
                       </td>
-                      <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 text-xs">
+                      <td className="py-3 px-4 font-medium text-[#1f1f1f] dark:text-[#e3e3e3] text-xs md:text-sm">
                         <div className="flex items-center gap-3 pointer-events-none">
                           <FileIcon name={file.name} mime={file.mime} size="sm" className="shrink-0" />
                           <span className="truncate max-w-[200px] sm:max-w-xs">{file.name}</span>
@@ -1312,33 +1277,35 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                             <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400 shrink-0 ml-0.5" />
                           )}
                           {file.offline && (
-                            <CheckCircle className="h-3.5 w-3.5 text-green-500 fill-green-500/20 dark:fill-green-950/30 shrink-0 ml-0.5" />
+                            <CheckCircle className="h-3.5 w-3.5 text-emerald-500 fill-emerald-500/20 shrink-0 ml-0.5" />
                           )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 hidden sm:table-cell text-xs text-slate-550 dark:text-slate-400 pointer-events-none">
+                      <td className="py-3 px-4 hidden sm:table-cell text-xs text-[#444746] dark:text-[#8e918f] pointer-events-none">
                         {getFileType(file)}
                       </td>
-                      <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-500 dark:text-slate-400 pointer-events-none">
+                      <td className="py-3 px-4 hidden md:table-cell text-xs text-[#444746] dark:text-[#8e918f] pointer-events-none">
                         {isDir ? "—" : formatFileSize(file.size)}
                       </td>
-                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-slate-500 dark:text-slate-400 pointer-events-none">
+                      <td className="py-3 px-4 hidden lg:table-cell text-xs text-[#444746] dark:text-[#8e918f] pointer-events-none">
                         {new Date(file.uploadedAt).toLocaleDateString()}
                       </td>
                       <td className="py-3 px-4 text-center" data-no-drag onClick={(e) => e.stopPropagation()}>
-                        <FileActionsMenu
-                          file={file}
-                          onPreview={toastPreview}
-                          onEdit={handleEdit}
-                          onDownload={handleDownload}
-                          onRename={openRenameDialog}
-                          onStarToggle={toggleStar}
-                          onTrash={moveToTrash}
-                          onDeletePermanently={setDeleteTarget}
-                          onArchive={archiveFile}
-                          onUnarchive={unarchiveFile}
-                          onOfflineToggle={toggleOffline}
-                        />
+                        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                          <FileActionsMenu
+                            file={file}
+                            onPreview={toastPreview}
+                            onEdit={handleEdit}
+                            onDownload={handleDownload}
+                            onRename={openRenameDialog}
+                            onStarToggle={toggleStar}
+                            onTrash={moveToTrash}
+                            onDeletePermanently={setDeleteTarget}
+                            onArchive={archiveFile}
+                            onUnarchive={unarchiveFile}
+                            onOfflineToggle={toggleOffline}
+                          />
+                        </div>
                       </td>
                     </tr>
                   </FileContextMenu>
@@ -1408,12 +1375,12 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
       {/* Floating Bulk Action Bar */}
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-4 bg-white/95 dark:bg-slate-950/95 text-slate-800 dark:text-slate-100 px-5 py-2.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-800/80 backdrop-blur-md animate-slide-up select-none">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-extrabold bg-brand-500 px-2.5 py-0.5 rounded-full text-white">{selectedIds.length}</span>
-            <span className="text-xs font-bold whitespace-nowrap text-slate-750 dark:text-slate-200">Selected</span>
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-4 bg-white/95 dark:bg-[#282a2c]/95 text-[#1f1f1f] dark:text-[#e3e3e3] px-5 py-2.5 rounded-full shadow-2xl border border-slate-300/80 dark:border-slate-700/80 backdrop-blur-md animate-slide-up select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold bg-[#0b57d0] dark:bg-[#a8c7fa] px-2.5 py-0.5 rounded-full text-white dark:text-[#003258]">{selectedIds.length}</span>
+            <span className="text-xs font-medium whitespace-nowrap text-[#1f1f1f] dark:text-[#e3e3e3]">selected</span>
           </div>
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+          <div className="h-4 w-px bg-slate-300/80 dark:bg-slate-700/80" />
           
           <div className="flex items-center gap-1.5">
             {mode === "trash" ? (
@@ -1421,7 +1388,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 <button
                   type="button"
                   onClick={handleBulkRestore}
-                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-brand-500 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-900/60 transition-all duration-150 active:scale-95 cursor-pointer border-0 bg-transparent outline-none"
+                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-[#444746] dark:text-[#c4c7c5] hover:text-[#0b57d0] dark:hover:text-[#a8c7fa] hover:bg-[#f0f4f9] dark:hover:bg-[#333537] transition-colors cursor-pointer border-0 bg-transparent outline-none"
                   title="Restore selected"
                 >
                   <RotateCcw className="h-4.5 w-4.5" />
@@ -1429,7 +1396,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 <button
                   type="button"
                   onClick={handleBulkDelete}
-                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-red-500 dark:text-red-400 hover:text-red-650 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all duration-150 active:scale-95 cursor-pointer border-0 bg-transparent outline-none"
+                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors cursor-pointer border-0 bg-transparent outline-none"
                   title="Delete permanently"
                 >
                   <Trash2 className="h-4.5 w-4.5" />
@@ -1440,7 +1407,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 <button
                   type="button"
                   onClick={handleBulkTrash}
-                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-red-550 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all duration-150 active:scale-95 cursor-pointer border-0 bg-transparent outline-none"
+                  className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-[#444746] dark:text-[#c4c7c5] hover:text-red-600 dark:hover:text-red-400 hover:bg-[#f0f4f9] dark:hover:bg-[#333537] transition-colors cursor-pointer border-0 bg-transparent outline-none"
                   title="Move selected to trash"
                 >
                   <Trash2 className="h-4.5 w-4.5" />
@@ -1451,7 +1418,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <button
               type="button"
               onClick={clearSelection}
-              className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-350 hover:bg-slate-100 dark:hover:bg-slate-900/60 transition-all duration-150 active:scale-95 cursor-pointer border-0 bg-transparent outline-none"
+              className="h-8.5 w-8.5 rounded-full flex items-center justify-center text-[#747775] dark:text-[#8e918f] hover:text-[#1f1f1f] dark:hover:text-[#e3e3e3] hover:bg-[#f0f4f9] dark:hover:bg-[#333537] transition-colors cursor-pointer border-0 bg-transparent outline-none"
               title="Clear selection"
             >
               <X className="h-4.5 w-4.5" />
@@ -1462,31 +1429,31 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
       {/* dialog for creating folder */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="rounded-2xl max-w-sm">
+        <DialogContent className="rounded-3xl max-w-sm p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold">New Folder</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">New folder</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreateFolderSubmit} className="space-y-4 pt-2">
+          <form onSubmit={handleCreateFolderSubmit} className="space-y-5 pt-2">
             <Input
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
-              placeholder="Folder name"
+              placeholder="Untitled folder"
               autoFocus
-              className="rounded-xl h-10"
+              className="rounded-xl h-11 px-3.5 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] focus-visible:ring-2 focus-visible:ring-[#0b57d0]/30"
             />
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="gap-2 sm:gap-2 justify-end">
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => setCreateDialogOpen(false)}
-                className="rounded-xl h-10 text-xs"
+                className="rounded-full h-9.5 px-4 text-xs font-medium text-[#0b57d0] dark:text-[#a8c7fa] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={!newFolderName.trim()}
-                className="rounded-xl h-10 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold px-4"
+                className="rounded-full h-9.5 px-5 bg-[#0b57d0] hover:bg-[#0842a0] dark:bg-[#a8c7fa] dark:text-[#003258] text-white text-xs font-semibold shadow-xs cursor-pointer border-0"
               >
                 Create
               </Button>
@@ -1497,33 +1464,33 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
       {/* dialog for renaming file */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
-        <DialogContent className="rounded-2xl max-w-sm bg-white dark:bg-slate-900 border dark:border-slate-800">
+        <DialogContent className="rounded-3xl max-w-sm p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold">Rename Item</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">Rename</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleRenameSubmit} className="space-y-4 pt-2">
+          <form onSubmit={handleRenameSubmit} className="space-y-5 pt-2">
             <Input
               value={newFileName}
               onChange={(e) => setNewFileName(e.target.value)}
               placeholder="New name"
               autoFocus
-              className="rounded-xl h-10"
+              className="rounded-xl h-11 px-3.5 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] focus-visible:ring-2 focus-visible:ring-[#0b57d0]/30"
             />
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="gap-2 sm:gap-2 justify-end">
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => setRenameDialogOpen(false)}
-                className="rounded-xl h-10 text-xs"
+                className="rounded-full h-9.5 px-4 text-xs font-medium text-[#0b57d0] dark:text-[#a8c7fa] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={!newFileName.trim()}
-                className="rounded-xl h-10 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold px-4"
+                className="rounded-full h-9.5 px-5 bg-[#0b57d0] hover:bg-[#0842a0] dark:bg-[#a8c7fa] dark:text-[#003258] text-white text-xs font-semibold shadow-xs cursor-pointer border-0"
               >
-                Rename
+                OK
               </Button>
             </DialogFooter>
           </form>
@@ -1675,22 +1642,22 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       {/* Empty Trash confirmation dialog (replaces window.confirm)           */}
       {/* ------------------------------------------------------------------ */}
       <Dialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
-        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+        <DialogContent className="rounded-3xl max-w-sm p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-              <Trash2 className="h-4 w-4 text-red-500" />
-              Empty Trash
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3] flex items-center gap-2">
+              <Trash2 className="h-4.5 w-4.5 text-red-600" />
+              Empty trash?
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+          <p className="text-xs text-[#444746] dark:text-[#8e918f] leading-relaxed mt-1">
             This will permanently delete <strong>{displayFiles.length} item{displayFiles.length !== 1 ? "s" : ""}</strong> from
-            your Telegram storage channel. This action <strong>cannot be undone</strong>.
+            your Telegram storage channel. This action cannot be undone.
           </p>
-          <DialogFooter className="mt-4 flex gap-2 justify-end">
+          <DialogFooter className="mt-5 flex gap-2 justify-end">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="rounded-xl text-xs font-semibold"
+              className="rounded-full h-9 px-4 text-xs font-medium text-[#444746] dark:text-[#c4c7c5] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer"
               onClick={() => setEmptyTrashDialogOpen(false)}
             >
               Cancel
@@ -1698,14 +1665,14 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <Button
               size="sm"
               disabled={isOperating}
-              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              className="rounded-full h-9 px-5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer border-0"
               onClick={async () => {
                 setEmptyTrashDialogOpen(false);
                 await emptyTrash();
                 clearSelection();
               }}
             >
-              {isOperating ? "Deleting…" : "Delete All Permanently"}
+              {isOperating ? "Deleting…" : "Empty trash"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1715,27 +1682,27 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       {/* Individual item permanent delete confirmation dialog               */}
       {/* ------------------------------------------------------------------ */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+        <DialogContent className="rounded-3xl max-w-sm p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-              <Trash2 className="h-4 w-4 text-red-500" />
-              Delete Permanently
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3] flex items-center gap-2">
+              <Trash2 className="h-4.5 w-4.5 text-red-600" />
+              Delete permanently?
             </DialogTitle>
           </DialogHeader>
           {deleteTarget && (
-            <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+            <p className="text-xs text-[#444746] dark:text-[#8e918f] leading-relaxed mt-1">
               Are you sure you want to permanently delete <strong>{deleteTarget.name}</strong>?
               {deleteTarget.mime !== "inode/directory" && deleteTarget.mime !== "application/x-directory" && (
                 <> This will delete the actual file from your Telegram storage channel.</>
               )}
-              This action <strong>cannot be undone</strong>.
+              This action cannot be undone.
             </p>
           )}
-          <DialogFooter className="mt-4 flex gap-2 justify-end">
+          <DialogFooter className="mt-5 flex gap-2 justify-end">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="rounded-xl text-xs font-semibold"
+              className="rounded-full h-9 px-4 text-xs font-medium text-[#444746] dark:text-[#c4c7c5] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
@@ -1743,7 +1710,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <Button
               size="sm"
               disabled={isOperating}
-              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              className="rounded-full h-9 px-5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer border-0"
               onClick={async () => {
                 if (deleteTarget) {
                   const targetId = deleteTarget.id;
@@ -1752,7 +1719,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                 }
               }}
             >
-              {isOperating ? "Deleting…" : "Delete Permanently"}
+              {isOperating ? "Deleting…" : "Delete forever"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1761,22 +1728,22 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       {/* Bulk permanent delete confirmation dialog                           */}
       {/* ------------------------------------------------------------------ */}
       <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
-        <DialogContent className="rounded-2xl max-w-sm p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+        <DialogContent className="rounded-3xl max-w-sm p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-              <Trash2 className="h-4 w-4 text-red-500" />
-              Delete {selectedIds.length} Item{selectedIds.length !== 1 ? "s" : ""} Permanently
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3] flex items-center gap-2">
+              <Trash2 className="h-4.5 w-4.5 text-red-600" />
+              Delete forever?
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+          <p className="text-xs text-[#444746] dark:text-[#8e918f] leading-relaxed mt-1">
             This will permanently delete <strong>{selectedIds.length} selected item{selectedIds.length !== 1 ? "s" : ""}</strong> from
-            your Telegram storage channel. This action <strong>cannot be undone</strong>.
+            your Telegram storage channel. This action cannot be undone.
           </p>
-          <DialogFooter className="mt-4 flex gap-2 justify-end">
+          <DialogFooter className="mt-5 flex gap-2 justify-end">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="rounded-xl text-xs font-semibold"
+              className="rounded-full h-9 px-4 text-xs font-medium text-[#444746] dark:text-[#c4c7c5] hover:bg-[#f0f4f9] dark:hover:bg-[#282a2c] cursor-pointer"
               onClick={() => setBulkDeleteDialogOpen(false)}
             >
               Cancel
@@ -1784,10 +1751,10 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
             <Button
               size="sm"
               disabled={isOperating}
-              className="rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white border-0"
+              className="rounded-full h-9 px-5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer border-0"
               onClick={confirmBulkDelete}
             >
-              {isOperating ? "Deleting…" : `Delete ${selectedIds.length} Item${selectedIds.length !== 1 ? "s" : ""}`}
+              {isOperating ? "Deleting…" : `Delete forever`}
             </Button>
           </DialogFooter>
         </DialogContent>

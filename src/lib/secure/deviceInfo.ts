@@ -9,7 +9,7 @@
  * (`macos | windows | linux | ios | android`). Anything unrecognized falls
  * back to `linux` (the most permissive default for desktop-class devices).
  */
-import type { OS } from '@/lib/api/types';
+export type OS = 'macos' | 'windows' | 'linux' | 'ios' | 'android';
 
 const USER_AGENT = (typeof navigator !== 'undefined' ? navigator.userAgent : '').toLowerCase();
 const PLATFORM =

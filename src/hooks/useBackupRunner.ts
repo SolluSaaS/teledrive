@@ -17,7 +17,6 @@
 import { useCallback, useRef, useState } from "react";
 import { runBackup, type BackupTrigger } from "@/lib/backup/runner";
 import { useBackupProgressStore } from "@/stores/backupProgressStore";
-import { ApiError } from "@/lib/api";
 
 export interface UseBackupRunner {
   /** True iff a manual run is currently in flight (triggered by THIS hook). */
@@ -58,12 +57,7 @@ export function useBackupRunner(): UseBackupRunner {
         error: result.error,
       });
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
+      const msg = err instanceof Error ? err.message : String(err);
       // The runner is supposed to never throw — failures surface in
       // result.status. This catch is a safety net for unexpected throws.
       fail(msg);

@@ -20,7 +20,6 @@ import { Api } from "telegram";
 import { getClient } from "../telegram/client";
 import { resolveChannelInputPeer } from "../storage/metadataStore";
 import { withTelegramRetry } from "../telegram/rateLimit";
-import { recordBackupJob } from "@/lib/api";
 import { useFileStore } from "@/stores/fileStore";
 import { invoke } from "@tauri-apps/api/core";
 import type { TeleFile } from "../types";
@@ -77,7 +76,6 @@ export async function takeSnapshot(
   };
 
   let messageId: number | null = null;
-  let status: "success" | "failed" = "failed";
   let errorMsg: string | null = null;
 
   try {
@@ -117,7 +115,6 @@ export async function takeSnapshot(
       "backup.sendSnapshot",
       3,
     );
-    status = "success";
   } catch (err) {
     errorMsg = err instanceof Error ? err.message : String(err);
     console.error("[backup] snapshot send failed:", err);
@@ -126,24 +123,6 @@ export async function takeSnapshot(
     }).catch(() => {});
   }
 
-  // Always record an audit row, even on failure, so the history shows
-  // attempted runs. The backend upsert on (userId, scheduledFor) means a
-  // retry of the same tick would update the row in place.
-  try {
-    await recordBackupJob({
-      scheduledFor: scheduledFor.toISOString(),
-      channelId,
-      snapshotMessageId: messageId,
-      fileCount,
-      totalBytes,
-      triggeredBy,
-      status,
-      error: errorMsg,
-    });
-  } catch (auditErr) {
-    // Audit failure is non-fatal — the snapshot is still in Telegram.
-    console.warn("[backup] audit POST failed (non-fatal):", auditErr);
-  }
 
   // Update the in-store timestamp regardless of success/failure so the UI
   // can show "Last attempt: Xs ago". For failures, the Plan page surfaces

@@ -6,6 +6,7 @@ import {
   FileAudio,
   FileCode,
   FileArchive,
+  FileSpreadsheet,
   File,
 } from "lucide-react";
 import { FolderIcon } from "./FolderIcon";
@@ -17,13 +18,20 @@ interface FileIconProps {
   mime: string;
   size?: "sm" | "md" | "lg";
   className?: string;
+  bare?: boolean;
 }
 
-export const FileIcon = React.memo(function FileIcon({ name = "", mime, size = "md", className }: FileIconProps) {
+export const FileIcon = React.memo(function FileIcon({
+  name = "",
+  mime,
+  size = "md",
+  className,
+  bare = false,
+}: FileIconProps) {
   const sizeClasses = {
-    sm: "h-5 w-5",
-    md: "h-10 w-10",
-    lg: "h-16 w-16",
+    sm: "h-4.5 w-4.5",
+    md: "h-8 w-8",
+    lg: "h-10 w-10",
   };
 
   const currentSizeClass = sizeClasses[size];
@@ -32,59 +40,113 @@ export const FileIcon = React.memo(function FileIcon({ name = "", mime, size = "
     return <FolderIcon size={size} className={className} />;
   }
 
-  // Helper to choose the right icon and color style based on file type
+  // Google Workspace file types & brand colors
   const getIconProps = () => {
     const iconType = getFileIconType(name, mime);
 
     switch (iconType) {
       case "folder":
-        return { Icon: FolderIcon, colorClass: "" };
+        return {
+          Icon: FolderIcon,
+          textColor: "text-[#444746] dark:text-[#c4c7c5]",
+          bgColor: "bg-slate-100 dark:bg-slate-800",
+        };
 
       case "image":
-        return { Icon: FileImage, colorClass: "text-rose-500 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20" };
+        return {
+          Icon: FileImage,
+          textColor: "text-[#ea4335] dark:text-[#f28b82]",
+          bgColor: "bg-red-50 dark:bg-red-950/25",
+        };
 
       case "video":
-        return { Icon: FileVideo, colorClass: "text-purple-500 dark:text-purple-400 bg-purple-50/50 dark:bg-purple-950/20" };
+        return {
+          Icon: FileVideo,
+          textColor: "text-[#ea4335] dark:text-[#f28b82]",
+          bgColor: "bg-red-50 dark:bg-red-950/25",
+        };
 
       case "audio":
-        return { Icon: FileAudio, colorClass: "text-teal-500 dark:text-teal-400 bg-teal-50/50 dark:bg-teal-950/20" };
+        return {
+          Icon: FileAudio,
+          textColor: "text-[#a142f4] dark:text-[#d7aefb]",
+          bgColor: "bg-purple-50 dark:bg-purple-950/25",
+        };
 
       case "pdf":
-        return { Icon: FileText, colorClass: "text-red-500 dark:text-red-400 bg-red-50/50 dark:bg-red-950/20" };
+        return {
+          Icon: FileText,
+          textColor: "text-[#ea4335] dark:text-[#f28b82]",
+          bgColor: "bg-red-50 dark:bg-red-950/25",
+        };
 
       case "spreadsheet":
-        return { Icon: FileText, colorClass: "text-emerald-500 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20" };
+        return {
+          Icon: FileSpreadsheet,
+          textColor: "text-[#1e8e3e] dark:text-[#81c995]",
+          bgColor: "bg-emerald-50 dark:bg-emerald-950/25",
+        };
 
       case "presentation":
-        return { Icon: FileText, colorClass: "text-amber-500 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20" };
+        return {
+          Icon: FileText,
+          textColor: "text-[#f9ab00] dark:text-[#fdd663]",
+          bgColor: "bg-amber-50 dark:bg-amber-950/25",
+        };
 
       case "code":
-        return { Icon: FileCode, colorClass: "text-indigo-500 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20" };
+        return {
+          Icon: FileCode,
+          textColor: "text-[#1a73e8] dark:text-[#8ab4f8]",
+          bgColor: "bg-blue-50 dark:bg-blue-950/25",
+        };
 
       case "archive":
-        return { Icon: FileArchive, colorClass: "text-orange-500 dark:text-orange-400 bg-orange-50/50 dark:bg-orange-950/20" };
+        return {
+          Icon: FileArchive,
+          textColor: "text-[#f29900] dark:text-[#fdd663]",
+          bgColor: "bg-amber-50 dark:bg-amber-950/25",
+        };
 
       case "document":
-        return { Icon: FileText, colorClass: "text-brand-500 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-950/20" };
+        return {
+          Icon: FileText,
+          textColor: "text-[#1a73e8] dark:text-[#8ab4f8]",
+          bgColor: "bg-blue-50 dark:bg-blue-950/25",
+        };
 
       case "file":
       default:
-        return { Icon: File, colorClass: "text-slate-500 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/20" };
+        return {
+          Icon: File,
+          textColor: "text-[#5f6368] dark:text-[#9aa0a6]",
+          bgColor: "bg-slate-100 dark:bg-slate-800",
+        };
     }
   };
 
-  const { Icon, colorClass } = getIconProps();
+  const { Icon, textColor, bgColor } = getIconProps();
+
+  if (bare || size === "sm") {
+    return (
+      <Icon
+        className={cn(currentSizeClass, textColor, "shrink-0", className)}
+        strokeWidth={size === "sm" ? 2 : 1.75}
+      />
+    );
+  }
 
   return (
     <div
       className={cn(
-        "flex items-center justify-center rounded-xl transition-all duration-300 ease-out group-hover:scale-110",
-        size === "lg" ? "p-4" : size === "md" ? "p-2" : "p-1",
-        colorClass,
+        "flex items-center justify-center rounded-xl transition-all duration-200 shrink-0",
+        size === "lg" ? "p-3" : "p-2",
+        bgColor,
+        textColor,
         className
       )}
     >
-      <Icon className={currentSizeClass} strokeWidth={size === "sm" ? 2 : 1.75} />
+      <Icon className={currentSizeClass} strokeWidth={1.75} />
     </div>
   );
 });

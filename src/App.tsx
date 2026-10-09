@@ -14,7 +14,6 @@ import ArchivedPage from "./pages/ArchivedPage";
 import SearchPage from "./pages/SearchPage";
 import BackupsPage from "./pages/BackupsPage";
 import BackupsFolderPage from "./pages/BackupsFolderPage";
-import RequirePro from "./components/auth/RequirePro";
 
 // Lazy pages
 const DriveLayout = lazy(() => import("./components/layout/DriveLayout"));
@@ -26,8 +25,8 @@ const RemoteSyncOrchestrator = lazy(() => import("./components/RemoteSyncOrchest
 // Full-screen spinner fallback
 function LoadingFallback() {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-background">
-      <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
+    <div className="flex h-screen w-screen items-center justify-center bg-background select-none">
+      <Loader2 className="h-8 w-8 animate-spin text-[#0B57D0] dark:text-[#A8C7FA]" />
     </div>
   );
 }
@@ -35,19 +34,15 @@ function LoadingFallback() {
 // Splash Screen Loader
 function SplashLoader({ status }: { status: string }) {
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-4 relative overflow-hidden">
-      {/* Decorative ambient background blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/8 dark:bg-brand-500/12 blur-[130px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/8 dark:bg-indigo-500/12 blur-[130px] pointer-events-none" />
-      
-      <div className="relative flex flex-col items-center gap-4">
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-background text-foreground gap-4 select-none">
+      <div className="flex flex-col items-center gap-4">
         <img
           src="/teledrive.png"
           alt="TeleDrive Logo"
-          className="h-16 w-16 object-contain animate-pulse shrink-0 rounded-2xl shadow-md"
+          className="h-16 w-16 object-contain shrink-0"
         />
-        <div className="flex items-center gap-2 text-slate-650 dark:text-slate-350 font-semibold bg-white/70 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/50 px-4.5 py-2 rounded-full shadow-sm">
-          <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-500" />
+        <div className="flex items-center gap-2.5 text-[#444746] dark:text-[#C4C7C5] font-medium bg-surface dark:bg-[#1E1F20] border border-slate-200/80 dark:border-slate-800/80 px-5 py-2 rounded-full shadow-xs">
+          <Loader2 className="h-4 w-4 animate-spin text-[#0B57D0] dark:text-[#A8C7FA]" />
           <span className="text-xs">{status}</span>
         </div>
       </div>
@@ -110,13 +105,6 @@ function App() {
           (async () => {
             const { useFileStore } = await import("./stores/fileStore");
             useFileStore.getState().setSyncing(true);
-            // In parallel, re-verify the backend license session (fire-and-forget).
-            // If a JWT is in Stronghold, this populates plan/license/devices.
-            // If the backend is unreachable or the JWT expired, the store
-            // degrades gracefully (toast warning, cached state preserved).
-            void import("./stores/licenseStore")
-              .then(({ useLicenseStore }) => useLicenseStore.getState().verifyBackendSession())
-              .catch((err) => console.warn("Backend verify on boot failed:", err));
             try {
               const restored = await restoreSession();
               if (restored) {
@@ -127,7 +115,7 @@ function App() {
             } finally {
               if (active) {
                 useFileStore.getState().setSyncing(false);
-                setIsRestoring(false); // In case we didn't have cached files and were still in splash loader
+                setIsRestoring(false);
               }
             }
           })();
@@ -187,13 +175,9 @@ function App() {
             <Route path="archived" element={<ArchivedPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="folder/*" element={<DriveBrowserPage />} />
-            {/* Device-backup entry points — Pro-only. RequirePro redirects
-                FREE users to /drive/my-drive with a one-shot toast. The root
-                shows every device's backup tree; the wildcard sub-route
-                handles drilling into a specific
-                /TeleDrive Backups/<device>/<inner> path. */}
-            <Route path="backups" element={<RequirePro><BackupsPage /></RequirePro>} />
-            <Route path="backups/folder/*" element={<RequirePro><BackupsFolderPage /></RequirePro>} />
+            {/* Device-backup entry points — available to all users. */}
+            <Route path="backups" element={<BackupsPage />} />
+            <Route path="backups/folder/*" element={<BackupsFolderPage />} />
           </Route>
 
           {/* Settings protected route */}
@@ -210,10 +194,8 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
-      {/* Pro feature: live multi-device sync coordinator. Headless component
-          that runs only while authenticated + bootstrapped. Suspended with
-          the same fallback as other lazy chunks — but since it renders null,
-          the fallback never appears. */}
+      {/* Live multi-device sync coordinator. Headless component
+          that runs only while authenticated + bootstrapped. */}
       <Suspense fallback={null}>
         <RemoteSyncOrchestrator />
       </Suspense>

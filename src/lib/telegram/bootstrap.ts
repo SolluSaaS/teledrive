@@ -12,6 +12,7 @@ import {
 import { useFileStore } from "../../stores/fileStore";
 import { TeleFile } from "../types";
 import { invoke } from "@tauri-apps/api/core";
+import { isJunkFile, filterJunkFiles } from "../storage/fileSanitizer";
 import {
   isManifestCorrupt,
   loadManifest,
@@ -72,6 +73,7 @@ async function bootstrapTeleDriveInner(
   } catch (err) {
     console.warn("[bootstrap] Failed to sync offline status with disk:", err);
   }
+  files = filterJunkFiles(files);
 
   // Initialize the local view immediately and RELEASE THE GATE. We do NOT
   // wait for the orphan scan or manifest-merge before allowing user
@@ -194,8 +196,9 @@ async function bootstrapTeleDriveInner(
       "client.getMessages(orphan scan)"
     );
 
-    // Read current files from store inside the task execution block to avoid race conditions.
+    // Read current files and cursor from store
     const currentFiles = useFileStore.getState().files;
+    const lastIndexMsgId = useFileStore.getState().lastIndexMsgId;
     const indexedMsgIds = new Set(currentFiles.map((f) => Number(f.messageId)));
     const orphans: TeleFile[] = [];
 
@@ -208,38 +211,55 @@ async function bootstrapTeleDriveInner(
       // Skip if already in the index
       if (indexedMsgIds.has(msgId)) continue;
 
+      // If we already have a loaded index with a cursor, only recover messages
+      // that were posted AFTER the last index was saved. Any message with msgId <= lastIndexMsgId
+      // was already present when the index was saved — if it's not in the index, it was deleted!
+      if (lastIndexMsgId > 0 && currentFiles.length > 0 && msgId <= lastIndexMsgId) {
+        continue;
+      }
+
       // Only care about document media (uploaded files)
       const media = (msg as any).media;
       if (!media?.document) continue;
+
+      // CRITICAL: Only recover files that were actually uploaded by TeleDrive!
+      // TeleDrive always tags uploaded files with `teledrive_file:{"folder":"..."}` caption.
+      // Random files, bot messages, or channel noise without this caption must NEVER
+      // be injected into the drive as unknown files.
+      const captionText = msg.message || msg.text || "";
+      if (!captionText.startsWith("teledrive_file:")) {
+        continue;
+      }
+
+      let folderPath = "/";
+      try {
+        const jsonStr = captionText.substring("teledrive_file:".length);
+        const meta = JSON.parse(jsonStr);
+        if (meta && typeof meta.folder === "string") {
+          folderPath = meta.folder;
+        } else {
+          continue;
+        }
+      } catch (_) {
+        // Corrupted or non-JSON metadata caption — do not inject unknown files
+        continue;
+      }
 
       const doc = media.document;
       const mimeType: string = doc.mimeType || "application/octet-stream";
       const size: number = Number(doc.size) || 0;
 
-      // Resolve name from document attribute first, then message caption
+      // Resolve name from document attribute
       let name = "Untitled";
       const filenameAttr = (doc.attributes || []).find(
         (a: any) => a.className === "DocumentAttributeFilename"
       );
       if (filenameAttr?.fileName) {
         name = filenameAttr.fileName;
-      } else if (msg.message && !msg.message.startsWith("teledrive_file:")) {
-        name = msg.message.trim();
-      } else if (msg.text && !msg.text.startsWith("teledrive_file:")) {
-        name = msg.text.trim();
       }
 
-      // Parse folder path from JSON metadata caption if present
-      let folderPath = "/";
-      const captionText = msg.message || msg.text || "";
-      if (captionText.startsWith("teledrive_file:")) {
-        try {
-          const jsonStr = captionText.substring("teledrive_file:".length);
-          const meta = JSON.parse(jsonStr);
-          if (meta && typeof meta.folder === "string") {
-            folderPath = meta.folder;
-          }
-        } catch (_) { /* ignore */ }
+      if (isJunkFile({ name, folderPath, mime: mimeType, size })) {
+        continue;
       }
 
       orphans.push({
@@ -474,7 +494,7 @@ async function mergeBackupManifestSync(
   let conversionFailures = 0;
   for (const [absPath, entry] of manifestEntries) {
     const tf = manifestEntryToTeleFile(absPath, entry, channelId);
-    if (tf) fromManifest.push(tf);
+    if (tf && !isJunkFile(tf)) fromManifest.push(tf);
     else conversionFailures++;
   }
   if (conversionFailures > 0) {

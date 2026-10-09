@@ -130,13 +130,10 @@ async function applyOptimistic(
   // overwrite Telegram with a partial / stale index and lose data on
   // the next restart. The user can retry the action once bootstrap
   // completes (which takes < 1s in practice).
-  if (!store.bootstrapComplete) {
+  if (!store.bootstrapComplete && store.files.length === 0) {
     await invoke("log_vault_state", {
       state: `ACTION_SUPPRESSED_PRE_BOOTSTRAP files=${nextFiles.length}`,
     }).catch(() => {});
-    // Roll back the optimistic update silently — the action will need
-    // to be re-run after bootstrap. The user typically never sees this
-    // because bootstrap completes before they can interact.
     if (!options.skipRollbackOnHardError) {
       rollbackToLastSnapshot();
     }

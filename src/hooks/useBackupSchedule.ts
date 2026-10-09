@@ -1,14 +1,8 @@
 /**
- * useBackupSchedule — bridges the licenseStore's scheduled interval value
- * to the BackupSection UI and the actual Rust timer.
+ * useBackupSchedule — manages the device backup schedule.
  *
- * Reads `license.scheduledBackupIntervalMinutes` (server-authoritative)
- * and the user's plan (PRO gate). Exposes a single `setIntervalMinutes`
- * that calls into `licenseStore.setProSchedule` (which PATCHes the
- * backend) AND `applyIntervalChange` (which restarts the Rust timer).
- *
- * Also tracks the last-attempt timestamp from the fileStore so the UI
- * can show "Last backup: 3h ago" without polling.
+ * All users can use backup scheduling — no Pro gate.
+ * Backup interval is stored locally via the licenseStore stub.
  */
 import { useCallback, useMemo } from "react";
 import { useLicenseStore } from "@/stores/licenseStore";
@@ -20,31 +14,23 @@ export type BackupIntervalMinutes = number | null;
 export interface UseBackupSchedule {
   /** Current schedule. null = disabled. 1440 = daily, 10080 = weekly. */
   intervalMinutes: BackupIntervalMinutes;
-  /** True iff the user has an active Pro license (the gate). */
+  /** Always true — backup scheduling is available to all users. */
   isPro: boolean;
   /** Last successful or failed backup timestamp (ms), null = never. */
   lastBackupAt: number | null;
   /** True iff a snapshot is currently in flight. */
   isRunning: boolean;
-  /**
-   * Update the schedule. Calls the backend PATCH first; if the user is
-   * not PRO, the backend rejects with 403 and we surface a toast. Only
-   * after the backend succeeds do we restart the Rust timer — so a
-   * server-side rejection doesn't leave the local timer ticking.
-   */
+  /** Update the schedule interval and restart the Rust timer accordingly. */
   setIntervalMinutes: (minutes: BackupIntervalMinutes) => Promise<void>;
   /** Trigger a manual snapshot right now. Resolves when done. */
   runNow: () => Promise<void>;
 }
 
 export function useBackupSchedule(): UseBackupSchedule {
-  const plan = useLicenseStore((s) => s.plan);
   const license = useLicenseStore((s) => s.license);
   const lastBackupAt = useFileStore((s) => s.lastBackupAt);
   const indexQueueState = useFileStore((s) => s.indexQueueState);
   const setProSchedule = useLicenseStore((s) => s.setProSchedule);
-
-  const isPro = plan === "PRO";
 
   const intervalMinutes = useMemo<BackupIntervalMinutes>(() => {
     const v = license?.scheduledBackupIntervalMinutes;
@@ -53,26 +39,20 @@ export function useBackupSchedule(): UseBackupSchedule {
 
   const setIntervalMinutes = useCallback(
     async (minutes: BackupIntervalMinutes) => {
-      if (!isPro) {
-        // Defensive — the server is authoritative, but early-return keeps
-        // the UI snappy.
-        return;
-      }
       await setProSchedule(minutes);
       // Restart the Rust timer with the new value (or stop it).
       await applyIntervalChange(minutes);
     },
-    [isPro, setProSchedule],
+    [setProSchedule],
   );
 
   const runNow = useCallback(async () => {
-    if (!isPro) return;
     await runBackupNow();
-  }, [isPro]);
+  }, []);
 
   return {
     intervalMinutes,
-    isPro,
+    isPro: true, // All users have full backup access
     lastBackupAt,
     isRunning: indexQueueState === "backup-running",
     setIntervalMinutes,

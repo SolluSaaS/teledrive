@@ -67,15 +67,21 @@ export async function downloadFileFromTelegram(
       return;
     }
     
-    toast.info(`Downloading "${fileName}"...`);
+    const toastId = `download-${messageId}-${Date.now()}`;
+    toast.loading(`Downloading "${fileName}"... 0%`, { id: toastId });
     
     // Download the media buffer from Telegram
+    let lastReportedPct = -1;
     const buffer = (await client.downloadMedia(message.media, {
       progressCallback: (downloadedBytes: any, totalBytes: any) => {
         const downloaded = toNumber(downloadedBytes);
         const total = toNumber(totalBytes);
         if (total > 0) {
           const pct = Math.round((downloaded / total) * 100);
+          if (pct !== lastReportedPct && (pct % 5 === 0 || pct === 100)) {
+            lastReportedPct = pct;
+            toast.loading(`Downloading "${fileName}"... ${pct}%`, { id: toastId });
+          }
           onProgress?.(pct);
         }
       },
@@ -87,7 +93,7 @@ export async function downloadFileFromTelegram(
     
     // Save the file to disk
     await writeFile(targetPath, buffer);
-    toast.success(`"${fileName}" downloaded successfully!`);
+    toast.success(`"${fileName}" downloaded successfully!`, { id: toastId });
   } catch (error: any) {
     console.error("Failed to download file:", error);
     toast.error(error.message || "Failed to download file.");

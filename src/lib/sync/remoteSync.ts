@@ -1,10 +1,9 @@
 /**
- * Multi-device sync coordinator (Pro feature).
+ * Multi-device sync coordinator.
  *
  * Polls the Telegram storage channel every POLL_INTERVAL_MS for new index
- * messages and merges any deltas into the in-memory fileStore. FREE users
- * stay on cold-start sync only — the coordinator short-circuits on
- * `plan !== 'PRO'`.
+ * messages and merges any deltas into the in-memory fileStore. Available
+ * to all users — there is no Pro gate.
  *
  * Read-only by design: the poll never writes to Telegram, so two devices
  * polling simultaneously can't conflict. The bootstrap gate (`bootstrapComplete`)
@@ -19,7 +18,6 @@
 import { loadIndexIncremental } from "../storage/metadataStore";
 import { withTelegramRetry } from "../telegram/rateLimit";
 import { useFileStore } from "../../stores/fileStore";
-import type { Plan } from "../api/types";
 import { logEvent } from "../events";
 
 const POLL_INTERVAL_MS = 30_000;
@@ -44,9 +42,7 @@ const state: CoordinatorState = {
  * nothing changed. NEVER throws — caller is the setTimeout loop and we
  * want it to keep running through transient errors.
  */
-async function runOneTick(channelId: string, plan: Plan): Promise<boolean> {
-  if (plan !== "PRO") return false;
-
+async function runOneTick(channelId: string): Promise<boolean> {
   const lastMsgId = useFileStore.getState().lastIndexMsgId;
   if (lastMsgId <= 0) {
     // Bootstrap hasn't recorded a cursor yet — skip. Next start() call
@@ -77,9 +73,7 @@ async function runOneTick(channelId: string, plan: Plan): Promise<boolean> {
   } catch (err) {
     // withTelegramRetry has already classified and logged; just keep the
     // loop alive. Hard errors (AUTH_KEY_UNREGISTERED, etc.) cause the
-    // wrapper to throw after retries are exhausted — caller (start) should
-    // also stop on hard errors, but we handle that at the start level by
-    // catching here.
+    // wrapper to throw after retries are exhausted.
     console.warn("[remoteSync] tick failed (will retry next interval):", err);
     return false;
   }
@@ -96,9 +90,6 @@ async function runOneTick(channelId: string, plan: Plan): Promise<boolean> {
 function flashSyncIndicator(): void {
   const { setIndexQueueState } = useFileStore.getState();
   setIndexQueueState("syncing-remote");
-  // After a short hold, drop back to idle (unless something else has taken
-  // over the indicator in the meantime — useFileStore is the source of
-  // truth, so we just set to "idle" when our window closes).
   setTimeout(() => {
     if (useFileStore.getState().indexQueueState === "syncing-remote") {
       setIndexQueueState("idle");
@@ -106,29 +97,24 @@ function flashSyncIndicator(): void {
   }, SYNC_INDICATOR_MIN_MS);
 }
 
-function scheduleNext(channelId: string, plan: Plan): void {
+function scheduleNext(channelId: string): void {
   if (!state.isRunning) return;
   state.timerId = setTimeout(async () => {
-    await runOneTick(channelId, plan);
-    scheduleNext(channelId, plan);
+    await runOneTick(channelId);
+    scheduleNext(channelId);
   }, POLL_INTERVAL_MS);
 }
 
 /**
  * Start the sync loop. Safe to call multiple times — subsequent calls are
- * no-ops unless the plan or channelId changed.
+ * no-ops unless the channelId changed.
  */
-export function startRemoteSync(channelId: string, plan: Plan): void {
+export function startRemoteSync(channelId: string): void {
   if (!channelId) {
     console.warn("[remoteSync] startRemoteSync called without channelId");
     return;
   }
   if (state.isRunning && state.currentChannelId === channelId) {
-    // Already polling this channel; just ensure the plan is current by
-    // restarting with the new plan if needed.
-    if (plan !== "PRO") {
-      stopRemoteSync();
-    }
     return;
   }
   if (state.isRunning) {
@@ -139,24 +125,16 @@ export function startRemoteSync(channelId: string, plan: Plan): void {
   state.currentChannelId = channelId;
   state.lastTickAt = 0;
 
-  if (plan !== "PRO") {
-    // FREE users stay on cold-start sync only. No polling.
-    return;
-  }
-
   // Don't start the loop until bootstrap has completed (lastIndexMsgId > 0).
-  // If bootstrap hasn't finished yet, the orchestrator component will call
-  // startRemoteSync again on bootstrapComplete.
   if (useFileStore.getState().lastIndexMsgId <= 0) {
     return;
   }
 
-  scheduleNext(channelId, plan);
+  scheduleNext(channelId);
 }
 
 /**
- * Stop the sync loop. Used by logout, by orchestrator on auth loss, and
- * when the plan flips to FREE.
+ * Stop the sync loop. Used by logout and orchestrator on auth loss.
  */
 export function stopRemoteSync(): void {
   if (state.timerId) {
@@ -173,11 +151,10 @@ export function stopRemoteSync(): void {
 }
 
 /**
- * Test/dev hook — manually trigger one tick. Used by the in-app "Sync now"
- * button in Plan & Devices (future). Returns true if any files were merged.
+ * Manually trigger one sync tick. Returns true if any files were merged.
  */
-export async function runSyncTickOnce(channelId: string, plan: Plan): Promise<boolean> {
-  return runOneTick(channelId, plan);
+export async function runSyncTickOnce(channelId: string): Promise<boolean> {
+  return runOneTick(channelId);
 }
 
 /** Read-only — returns the last successful tick timestamp (0 if never). */

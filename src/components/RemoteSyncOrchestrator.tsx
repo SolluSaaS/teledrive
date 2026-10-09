@@ -3,13 +3,15 @@
  * scheduled-backup tick listener.
  *
  * Mounted once at the App root (post-auth). Manages the lifecycle of:
- *   - `startRemoteSync` / `stopRemoteSync` based on auth, plan, bootstrap
+ *   - `startRemoteSync` / `stopRemoteSync` based on auth and bootstrap
  *   - `ensureTickListenerStarted` (so the Rust timer's tick events reach
  *     the snapshot sender) on app start
  *
  * Renders nothing. All state lives in module-scoped vars inside
- * remoteSync.ts / scheduler.ts. This component is purely the React glue
- * to the auth and plan stores.
+ * remoteSync.ts / scheduler.ts.
+ *
+ * NOTE: Multi-device sync is now available to all authenticated users.
+ * Plan checks have been removed — TeleDrive is a free application.
  */
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/authStore";
@@ -25,17 +27,13 @@ import { getStorageChannelId } from "@/lib/telegram/channelManager";
 
 export default function RemoteSyncOrchestrator(): null {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const plan = useLicenseStore((s) => s.plan);
   const bootstrapComplete = useFileStore((s) => s.bootstrapComplete);
   const lastIndexMsgId = useFileStore((s) => s.lastIndexMsgId);
   const intervalMinutes =
     useLicenseStore((s) => s.license?.scheduledBackupIntervalMinutes) ?? null;
 
   // Effect 1 — bootstrap listener for backup ticks. Runs once on mount,
-  // tears down on unmount. The listener itself stays across the lifetime
-  // of the app — we want Rust ticks to reach the snapshot sender even if
-  // the user is currently on the Settings page (where the orchestrator
-  // component is still mounted via App.tsx).
+  // tears down on unmount.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -51,8 +49,8 @@ export default function RemoteSyncOrchestrator(): null {
     };
   }, []);
 
-  // Effect 2 — react to plan + interval changes. When the user picks a
-  // new interval, push it to the Rust timer.
+  // Effect 2 — react to interval changes. When the user picks a new
+  // interval, push it to the Rust timer.
   useEffect(() => {
     if (!isAuthenticated) return;
     if (intervalMinutes === null || intervalMinutes <= 0) {
@@ -62,26 +60,11 @@ export default function RemoteSyncOrchestrator(): null {
     void applyIntervalChange(intervalMinutes);
   }, [isAuthenticated, intervalMinutes]);
 
-  // Effect 3 — react to auth + bootstrap + plan changes. Start the
-  // remote sync loop when all pre-conditions are met; stop on any
-  // pre-condition failing.
-  //
-  // Multi-device sync is a Pro-only feature. The runtime check inside
-  // `remoteSync.startRemoteSync` also enforces `plan !== "PRO"` (see
-  // `src/lib/sync/remoteSync.ts:142`), but we gate at the orchestrator
-  // too so the polling loop never even initializes for FREE users. This
-  // is belt-and-braces: if a future refactor moves the plan check out
-  // of `remoteSync.ts`, the orchestrator still refuses to start the
-  // loop. The `stopRemoteSync()` on the FREE branch also tears down any
-  // in-flight loop the instant a Pro user's plan flips back to FREE
-  // (e.g. subscription lapse) so polling stops immediately rather than
-  // waiting for the next tick.
+  // Effect 3 — react to auth + bootstrap changes. Start the remote sync
+  // loop when all pre-conditions are met; stop on any pre-condition failing.
+  // Multi-device sync is now available to ALL authenticated users.
   useEffect(() => {
     if (!isAuthenticated || !bootstrapComplete) {
-      stopRemoteSync();
-      return;
-    }
-    if (plan !== "PRO") {
       stopRemoteSync();
       return;
     }
@@ -96,7 +79,7 @@ export default function RemoteSyncOrchestrator(): null {
         const channelId = await getStorageChannelId(phone);
         if (cancelled) return;
         if (channelId) {
-          startRemoteSync(channelId, plan);
+          startRemoteSync(channelId);
         }
       } catch (err) {
         console.warn(
@@ -114,7 +97,7 @@ export default function RemoteSyncOrchestrator(): null {
       if (retryHandle) clearTimeout(retryHandle);
       stopRemoteSync();
     };
-  }, [isAuthenticated, plan, bootstrapComplete, lastIndexMsgId]);
+  }, [isAuthenticated, bootstrapComplete, lastIndexMsgId]);
 
   return null;
 }

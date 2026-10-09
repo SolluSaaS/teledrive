@@ -3,6 +3,7 @@ import { getClient } from "../telegram/client";
 import { TeleFile } from "../types";
 import { useFileStore } from "../../stores/fileStore";
 import { enqueueSave } from "./indexQueue";
+import { filterJunkFiles } from "./fileSanitizer";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -352,13 +353,17 @@ export function reconstructMissingFolders(
 }
 
 async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFile[]> {
+  // First, strip all system and git junk (.DS_Store, git objects, hooks, refs, etc.)
+  const cleanSource = filterJunkFiles(files);
+  const hadJunk = cleanSource.length !== files.length;
+
   // Reconstruct first (so folder entries exist for any folderPath references),
   // THEN dedupe. Order matters: reconstructMissingFolders creates folder
   // entries with deterministic ids, and dedupeByMessageId / collapseDuplicateFolders
   // would otherwise drop folder duplicates that have the same id but different
   // random metadata. Doing it this way means duplicate folders from previous
   // cold starts collapse to one canonical entry before they hit the queue.
-  const { healedFiles, changed } = reconstructMissingFolders(files, channelId);
+  const { healedFiles, changed } = reconstructMissingFolders(cleanSource, channelId);
   // Order: dedupeByMessageId → dedupeByContentKey → collapseDuplicateFolders.
   // - dedupeByMessageId handles single-message races (same Telegram message
   //   represented twice).
@@ -367,10 +372,12 @@ async function healAndSave(channelId: string, files: TeleFile[]): Promise<TeleFi
   // - collapseDuplicateFolders finally handles folder-entry duplicates by
   //   full path.
   const cleaned = collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(healedFiles)));
-  if (changed || cleaned.length !== files.length) {
+  if (changed || hadJunk || cleaned.length !== files.length) {
     console.log(
-      `[metadataStore] Healed ${changed ? "folders" : ""}${changed && cleaned.length !== files.length ? " + " : ""}${
-        cleaned.length !== files.length ? `dedup removed ${files.length - cleaned.length}` : ""
+      `[metadataStore] Healed ${hadJunk ? `(removed ${files.length - cleanSource.length} junk) ` : ""}${
+        changed ? "folders" : ""
+      }${changed && cleaned.length !== cleanSource.length ? " + " : ""}${
+        cleaned.length !== cleanSource.length ? `dedup removed ${cleanSource.length - cleaned.length}` : ""
       }. Saving updated index to Telegram...`
     );
     enqueueSave(channelId, cleaned).catch((err) => {
@@ -512,32 +519,29 @@ export function pickCoherentIndexSet(
     else byTotal.set(p.totalChunks, [p]);
   }
 
-  // Selection rule (Tier 1 fix — T1.2):
-  //   1. Among complete epochs, prefer the LARGEST `totalChunks`. A
-  //      freshly-recovered 4-chunk index reflects more of the user's files
-  //      than a stale 1-chunk post-recovery user action.
-  //   2. Tie-break by the HIGHEST minimum message id — newer Telegram
-  //      message ids (within a tie on totalChunks) are the more recent
-  //      save epoch.
-  //
-  // Rationale for the size-wins rule: the queue always writes the FULL
-  // state, so a user action after recovery generates a complete snapshot
-  // that the bootstrap layer eventually picks up. A 1-chunk set is almost
-  // always stale relative to a 4-chunk set.
+  // Selection rule:
+  // An epoch's freshness in Telegram is strictly determined by its message IDs.
+  // Because Telegram message IDs are strictly monotonic and sequential, the complete
+  // epoch with the HIGHEST maxMsgId represents the latest successful index save.
+  // We must not prefer larger totalChunks over recency, because doing so breaks
+  // deletions, file organization, and cleanups when an index shrinks in chunk count.
   let best: ParsedIndexChunk[] | null = null;
-  let bestTotal = -1;
+  let bestMaxId = -Infinity;
   let bestMinId = -Infinity;
   for (const [, chunks] of byTotal) {
     const coherent = findMostRecentCoherentEpoch(chunks);
     if (!coherent) continue;
-    const total = coherent[0]?.totalChunks ?? 0;
+    const maxId = coherent.reduce(
+      (m, c) => Math.max(m, c.msgId),
+      -Infinity
+    );
     const minId = coherent.reduce(
       (m, c) => Math.min(m, c.msgId),
       Infinity
     );
-    if (total > bestTotal || (total === bestTotal && minId > bestMinId)) {
+    if (maxId > bestMaxId || (maxId === bestMaxId && minId > bestMinId)) {
       best = coherent;
-      bestTotal = total;
+      bestMaxId = maxId;
       bestMinId = minId;
     }
   }
@@ -617,6 +621,11 @@ export async function loadIndex(channelId: string): Promise<TeleFile[]> {
       channelId,
       collapseDuplicateFolders(dedupeByContentKey(dedupeByMessageId(Array.from(byId.values()))))
     );
+  }
+
+  const maxChosenMsgId = chosenSet.reduce((max, c) => Math.max(max, c.msgId), 0);
+  if (maxChosenMsgId > 0) {
+    useFileStore.getState().setLastIndexMsgId(maxChosenMsgId);
   }
 
   // Merge chosen set into a single TeleFile list, deduping by id.

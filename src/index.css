@@ -5,8 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-heading: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -15,6 +15,7 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -51,48 +52,51 @@
   --color-brand-200: #a8c7fa;
   --color-brand-300: #7cacf8;
   --color-brand-400: #4c8df6;
-  --color-brand-500: #1a73e8; /* Google Drive blue */
-  --color-brand-600: #1b66ca;
-  --color-brand-700: #1a55a8;
-  --color-brand-800: #17458f;
-  --color-brand-900: #13346b;
-  --color-brand-950: #0a1f44;
+  --color-brand-500: #0b57d0; /* Google Drive blue (#0B57D0 / #1A73E8) */
+  --color-brand-600: #0842a0;
+  --color-brand-700: #063177;
+  --color-brand-800: #042150;
+  --color-brand-900: #031535;
+  --color-brand-950: #010a1b;
   --sidebar-width: var(--sidebar-width);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Google Drive Light Theme Tokens */
+  --background: #f8fafd;            /* Google Drive ambient canvas */
+  --foreground: #1f1f1f;            /* Google Material on-surface */
+  --surface: #ffffff;               /* File list container sheet */
+  --card: #ffffff;
+  --card-foreground: #1f1f1f;
+  --popover: #ffffff;
+  --popover-foreground: #1f1f1f;
+  --primary: #0b57d0;               /* Signature Google Drive blue */
+  --primary-foreground: #ffffff;
+  --secondary: #edf2fc;             /* Google Drive light pill / search */
+  --secondary-foreground: #041e49;
+  --muted: #f0f4f9;                 /* Soft neutral container */
+  --muted-foreground: #444746;      /* Material 3 on-surface-variant */
+  --accent: #c2e7ff;                /* Active navigation pill light blue */
+  --accent-foreground: #001d35;      /* Deep navy ink on active pill */
+  --destructive: #b3261e;
+  --border: #e0e3e7;
+  --input: #edf2fc;
+  --ring: #0b57d0;
+  --chart-1: #0b57d0;
+  --chart-2: #1e8e3e;
+  --chart-3: #f9ab00;
+  --chart-4: #d93025;
+  --chart-5: #a142f4;
+  --radius: 0.75rem;
+
+  --sidebar: #f8fafd;
+  --sidebar-foreground: #1f1f1f;
+  --sidebar-primary: #0b57d0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #c2e7ff;
+  --sidebar-accent-foreground: #001d35;
+  --sidebar-border: transparent;
+  --sidebar-ring: #0b57d0;
 
   --sidebar-width: 256px;
   --topbar-height: 64px;
@@ -100,37 +104,40 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Google Drive Dark Theme Tokens */
+  --background: #131314;            /* Google Dark Canvas */
+  --foreground: #e3e3e3;            /* Google Dark on-surface */
+  --surface: #1e1f20;               /* File list container dark sheet */
+  --card: #1e1f20;
+  --card-foreground: #e3e3e3;
+  --popover: #282a2c;
+  --popover-foreground: #e3e3e3;
+  --primary: #a8c7fa;               /* Google Blue Dark variant */
+  --primary-foreground: #003258;
+  --secondary: #282a2c;
+  --secondary-foreground: #c4c7c5;
+  --muted: #282a2c;
+  --muted-foreground: #c4c7c5;
+  --accent: #004a77;                /* Google active dark blue pill */
+  --accent-foreground: #c2e7ff;
+  --destructive: #f2b8b5;
+  --border: #2d2f31;
+  --input: #282a2c;
+  --ring: #a8c7fa;
+  --chart-1: #a8c7fa;
+  --chart-2: #81c995;
+  --chart-3: #fdd663;
+  --chart-4: #f28b82;
+  --chart-5: #d7aefb;
+
+  --sidebar: #131314;
+  --sidebar-foreground: #e3e3e3;
+  --sidebar-primary: #a8c7fa;
+  --sidebar-primary-foreground: #003258;
+  --sidebar-accent: #004a77;
+  --sidebar-accent-foreground: #c2e7ff;
+  --sidebar-border: transparent;
+  --sidebar-ring: #a8c7fa;
 }
 
 @layer base {
@@ -142,6 +149,37 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* Google Drive subtle custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #dadce0;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #bdc1c6;
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: #3c4043;
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #5f6368;
+  }
+
+  ::selection {
+    background: #c2e7ff;
+    color: #001d35;
+  }
+  .dark ::selection {
+    background: #004a77;
+    color: #c2e7ff;
   }
 }
 
