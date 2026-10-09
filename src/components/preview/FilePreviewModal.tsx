@@ -38,6 +38,15 @@ import {
   Minimize,
   SkipForward,
   SkipBack,
+  Eye,
+  Code,
+  Copy,
+  Check,
+  WrapText,
+  FolderArchive,
+  Sparkles,
+  FileJson,
+  Type,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/downloader";
@@ -53,6 +62,7 @@ import { detectLang } from "@/lib/files/langDetect";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { SyntaxHighlighter } from "./SyntaxHighlighter";
 import { CodeEditor } from "./CodeEditor";
+import { CsvTableViewer } from "./CsvTableViewer";
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
@@ -78,10 +88,13 @@ const O2_LANG_MAP: Record<string, string> = {
 
 function FileTypeIcon({ mime, name }: { mime: string; name: string }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (mime.startsWith("image/")) return <ImageIcon className="h-4 w-4 text-purple-500 shrink-0" />;
+  if (mime.startsWith("image/") || ext === "svg") return <ImageIcon className="h-4 w-4 text-purple-500 shrink-0" />;
   if (mime.startsWith("video/")) return <Film className="h-4 w-4 text-pink-500 shrink-0" />;
   if (mime.startsWith("audio/")) return <Music className="h-4 w-4 text-teal-500 shrink-0" />;
-  if (["csv", "xls", "xlsx"].includes(ext)) return <FileSpreadsheet className="h-4 w-4 text-emerald-500 shrink-0" />;
+  if (["csv", "tsv", "xls", "xlsx"].includes(ext)) return <FileSpreadsheet className="h-4 w-4 text-emerald-500 shrink-0" />;
+  if (["zip", "tar", "gz", "tgz", "rar", "7z", "bz2", "xz"].includes(ext)) return <FolderArchive className="h-4 w-4 text-amber-500 shrink-0" />;
+  if (["json", "jsonc", "json5"].includes(ext)) return <FileJson className="h-4 w-4 text-yellow-500 shrink-0" />;
+  if (["md", "markdown"].includes(ext)) return <FileText className="h-4 w-4 text-blue-500 shrink-0" />;
   if (isEditableFile({ mime, name } as TeleFile)) return <FileCode2 className="h-4 w-4 text-blue-500 shrink-0" />;
   return <FileText className="h-4 w-4 text-slate-400 shrink-0" />;
 }
@@ -136,6 +149,14 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   const [contentUrl, setContentUrl]   = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [markdownHtml, setMarkdownHtml] = useState<string | null>(null);
+
+  // ── Multi-format View Mode states ───────────────────────────────────────
+  const [mdViewMode, setMdViewMode]     = useState<"preview" | "source">("preview");
+  const [csvViewMode, setCsvViewMode]   = useState<"table" | "source">("table");
+  const [svgViewMode, setSvgViewMode]   = useState<"image" | "code">("image");
+  const [wrapLines, setWrapLines]       = useState(false);
+  const [codeFontSize, setCodeFontSize] = useState(13);
+  const [copiedCode, setCopiedCode]     = useState(false);
 
   // ── Edit state ──────────────────────────────────────────────────────────
   const [isEditMode, setIsEditMode]   = useState(false);
@@ -527,6 +548,8 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
     (async () => {
       setLoading(true); setProgress(0); setError(null);
       setTextContent(null); setContentUrl(null); setMarkdownHtml(null);
+      setMdViewMode("preview"); setCsvViewMode("table"); setSvgViewMode("image");
+      setWrapLines(false); setCopiedCode(false);
 
       try {
         let buffer: Uint8Array;
@@ -552,6 +575,25 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         if (!current) return;
 
         const mimeLower = file.mime.toLowerCase();
+        const isSvgFile = file.name.toLowerCase().endsWith(".svg") || mimeLower === "image/svg+xml";
+
+        // Always create Blob URL for media, pdf, and SVG visual rendering
+        if (
+          file.mime.startsWith("image/") ||
+          file.mime.startsWith("video/") ||
+          file.mime.startsWith("audio/") ||
+          file.mime === "application/pdf" ||
+          isSvgFile
+        ) {
+          const blob = new Blob([buffer.buffer as ArrayBuffer], { type: isSvgFile ? "image/svg+xml" : file.mime });
+          if (current) {
+            setContentUrl((prev) => {
+              if (prev) URL.revokeObjectURL(prev);
+              return URL.createObjectURL(blob);
+            });
+          }
+        }
+
         const isTextMime = (
           mimeLower.startsWith("text/") ||
           mimeLower.includes("javascript") || mimeLower.includes("typescript") ||
@@ -560,7 +602,24 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
           mimeLower.includes("x-python")
         );
 
-        if (isTextMime || isEditableFile(file)) {
+        // Check if buffer contains null bytes in the first 1KB (binary check)
+        let hasNullByte = false;
+        const checkBytes = buffer.subarray(0, Math.min(buffer.length, 1024));
+        for (let b = 0; b < checkBytes.length; b++) {
+          if (checkBytes[b] === 0) {
+            hasNullByte = true;
+            break;
+          }
+        }
+
+        const shouldDecodeText = (
+          isTextMime ||
+          isEditableFile(file) ||
+          (!hasNullByte && !mimeLower.startsWith("image/") && !mimeLower.startsWith("video/") && !mimeLower.startsWith("audio/") && mimeLower !== "application/pdf") ||
+          isSvgFile
+        );
+
+        if (shouldDecodeText) {
           // Guard for massive text files (> 3MB) to prevent editor memory exhaustion
           const MAX_TEXT_PREVIEW_BYTES = 3 * 1024 * 1024;
           let isTruncated = false;
@@ -579,7 +638,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
           if (!current) return;
           setTextContent(text);
 
-          if (mimeLower === "text/markdown" || file.name.endsWith(".md")) {
+          if (mimeLower === "text/markdown" || file.name.toLowerCase().endsWith(".md") || file.name.toLowerCase().endsWith(".markdown")) {
             const html = await marked.parse(text);
             if (current) setMarkdownHtml(sanitizeHtml(html));
           }
@@ -588,7 +647,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             setEditContent(text);
             setIsEditMode(true);
           }
-        } else {
+        } else if (!contentUrl && !file.mime.startsWith("image/") && !file.mime.startsWith("video/") && !file.mime.startsWith("audio/") && file.mime !== "application/pdf") {
           const blob = new Blob([buffer.buffer as ArrayBuffer], { type: file.mime });
           if (current) {
             setContentUrl((prev) => {
@@ -741,30 +800,84 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
     }
   }, [file, textContent, editContent, isEditMode]);
 
-  if (!file) return null;
+  const handleCopyContent = useCallback(() => {
+    const current = isEditMode ? editContent : (textContent ?? "");
+    if (!current) return;
+    navigator.clipboard.writeText(current);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+    toast.success("Copied to clipboard");
+  }, [isEditMode, editContent, textContent]);
+
+  const cycleFontSize = useCallback(() => {
+    setCodeFontSize(prev => {
+      if (prev === 12) return 13;
+      if (prev === 13) return 15;
+      if (prev === 15) return 16;
+      return 12;
+    });
+  }, []);
+
+  const handleFormatJson = useCallback(() => {
+    try {
+      const src = isEditMode ? editContent : (textContent ?? "");
+      const parsed = JSON.parse(src);
+      const formatted = JSON.stringify(parsed, null, 2);
+      if (isEditMode) {
+        setEditContent(formatted);
+      } else {
+        setTextContent(formatted);
+      }
+      toast.success("JSON formatted");
+    } catch (e: any) {
+      toast.error(`Invalid JSON: ${e.message}`);
+    }
+  }, [isEditMode, editContent, textContent]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  const langInfo   = detectLang(file.name);
-  const isImage    = file.mime.startsWith("image/");
-  const isVideo    = file.mime.startsWith("video/");
-  const isAudio    = file.mime.startsWith("audio/");
-  const isPdf      = file.mime === "application/pdf";
-  const isMarkdown = markdownHtml !== null && !isEditMode;
-  const isCode     = textContent !== null && !isMarkdown;
-  const canEdit    = isEditableFile(file) && !loading && !error && textContent !== null;
-  // Only show O2 button when we have a runnable language loaded
-  const canRunInO2 = textContent !== null && !loading && !error &&
-    O2_LANG_MAP[langInfo.hljsLang] !== undefined;
+  const langInfo        = detectLang(file?.name ?? "");
+  const ext             = file?.name.split(".").pop()?.toLowerCase() ?? "";
+  const isSvg           = ext === "svg" || (file?.mime?.toLowerCase() === "image/svg+xml");
+  const isImage         = (file?.mime?.startsWith("image/") ?? false) && !isSvg;
+  const isVideo         = file?.mime?.startsWith("video/") ?? false;
+  const isAudio         = file?.mime?.startsWith("audio/") ?? false;
+  const isPdf           = file?.mime === "application/pdf";
+  const isMarkdownFile  = ext === "md" || ext === "markdown" || (file?.mime?.toLowerCase() === "text/markdown");
+  const isCsvFile       = ext === "csv" || (file?.mime?.toLowerCase() === "text/csv");
+  const isTsvFile       = ext === "tsv" || (file?.mime?.toLowerCase() === "text/tab-separated-values");
+  const isTableData     = (isCsvFile || isTsvFile) && textContent !== null;
+  const isJsonFile      = ext === "json" || ext === "jsonc" || ext === "json5" || (file?.mime?.toLowerCase().includes("json") ?? false);
+  const isArchive       = ["zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "iso", "dmg"].includes(ext);
+
+  const isMarkdownPreview = isMarkdownFile && mdViewMode === "preview" && !isEditMode;
+  const isTableView       = isTableData && csvViewMode === "table" && !isEditMode;
+  const isSvgImageView    = isSvg && svgViewMode === "image" && !isEditMode;
+  const isCode            = textContent !== null && !isMarkdownPreview && !isTableView && !isSvgImageView;
+  const canEdit           = Boolean(file && isEditableFile(file) && !loading && !error && textContent !== null);
+  const canRunInO2        = textContent !== null && !loading && !error && O2_LANG_MAP[langInfo.hljsLang] !== undefined;
 
   const statusParts: string[] = [];
-  if (langInfo.displayName && !isImage && !isVideo && !isAudio && !isPdf)
+  if (langInfo.displayName && !isImage && !isVideo && !isAudio && !isPdf && !isArchive) {
     statusParts.push(langInfo.displayName);
-  if (textContent !== null) {
+  }
+  if (isMarkdownPreview && textContent) {
+    const words = textContent.trim().split(/\s+/).filter(Boolean).length;
+    const readingMin = Math.max(1, Math.ceil(words / 200));
+    statusParts.push(`${words.toLocaleString()} words`);
+    statusParts.push(`${readingMin} min read`);
+  } else if (isTableView && textContent) {
+    const lines = textContent.split("\n").filter(l => l.trim().length > 0).length;
+    statusParts.push(`${lines.toLocaleString()} rows`);
+  } else if (textContent !== null) {
     const lc = (isEditMode ? editContent : textContent).split("\n").length;
     statusParts.push(`${lc.toLocaleString()} lines`);
+    statusParts.push(wrapLines ? "Wrap: On" : "Wrap: Off");
+    statusParts.push(`${codeFontSize}px`);
   }
   statusParts.push("UTF-8");
   if (isEditMode) statusParts.push(`Ln ${cursorPos.line}, Col ${cursorPos.col}`);
+
+  if (!file) return null;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -856,6 +969,153 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             </>
           ) : (
             <>
+              {/* ── View Switchers ─────────────────────────────────── */}
+              {isMarkdownFile && textContent !== null && (
+                <div
+                  className="flex items-center p-0.5 rounded-lg border text-xs mr-1"
+                  style={{ borderColor: colors.border, background: colors.badgeBg }}
+                >
+                  <button
+                    onClick={() => setMdViewMode("preview")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      mdViewMode === "preview"
+                        ? "bg-white dark:bg-[#333537] text-blue-600 dark:text-blue-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f] hover:text-black dark:hover:text-white"
+                    }`}
+                  >
+                    <Eye className="h-3 w-3" />
+                    <span className="hidden sm:inline">Preview</span>
+                  </button>
+                  <button
+                    onClick={() => setMdViewMode("source")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      mdViewMode === "source"
+                        ? "bg-white dark:bg-[#333537] text-blue-600 dark:text-blue-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f] hover:text-black dark:hover:text-white"
+                    }`}
+                  >
+                    <Code className="h-3 w-3" />
+                    <span className="hidden sm:inline">Source</span>
+                  </button>
+                </div>
+              )}
+
+              {isTableData && (
+                <div
+                  className="flex items-center p-0.5 rounded-lg border text-xs mr-1"
+                  style={{ borderColor: colors.border, background: colors.badgeBg }}
+                >
+                  <button
+                    onClick={() => setCsvViewMode("table")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      csvViewMode === "table"
+                        ? "bg-white dark:bg-[#333537] text-emerald-600 dark:text-emerald-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f] hover:text-black dark:hover:text-white"
+                    }`}
+                  >
+                    <FileSpreadsheet className="h-3 w-3" />
+                    <span className="hidden sm:inline">Table</span>
+                  </button>
+                  <button
+                    onClick={() => setCsvViewMode("source")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      csvViewMode === "source"
+                        ? "bg-white dark:bg-[#333537] text-emerald-600 dark:text-emerald-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f] hover:text-black dark:hover:text-white"
+                    }`}
+                  >
+                    <Code className="h-3 w-3" />
+                    <span className="hidden sm:inline">Raw</span>
+                  </button>
+                </div>
+              )}
+
+              {isSvg && textContent !== null && (
+                <div
+                  className="flex items-center p-0.5 rounded-lg border text-xs mr-1"
+                  style={{ borderColor: colors.border, background: colors.badgeBg }}
+                >
+                  <button
+                    onClick={() => setSvgViewMode("image")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      svgViewMode === "image"
+                        ? "bg-white dark:bg-[#333537] text-purple-600 dark:text-purple-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f]"
+                    }`}
+                  >
+                    <ImageIcon className="h-3 w-3" />
+                    <span className="hidden sm:inline">Vector</span>
+                  </button>
+                  <button
+                    onClick={() => setSvgViewMode("code")}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      svgViewMode === "code"
+                        ? "bg-white dark:bg-[#333537] text-purple-600 dark:text-purple-400 shadow-xs"
+                        : "text-[#444746] dark:text-[#8e918f]"
+                    }`}
+                  >
+                    <Code className="h-3 w-3" />
+                    <span className="hidden sm:inline">Code</span>
+                  </button>
+                </div>
+              )}
+
+              {/* ── Format & Code View Controls ─────────────────────── */}
+              {isJsonFile && textContent !== null && (
+                <button
+                  onClick={handleFormatJson}
+                  title="Format JSON (Prettify)"
+                  className="flex items-center gap-1 h-7 px-2 text-[12px] font-semibold rounded-lg cursor-pointer transition-colors"
+                  style={{ color: colors.muted }}
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.hover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <span className="hidden md:inline">Format</span>
+                </button>
+              )}
+
+              {(isCode || (isMarkdownFile && mdViewMode === "source") || (isTableData && csvViewMode === "source") || (isSvg && svgViewMode === "code")) && (
+                <>
+                  <button
+                    onClick={() => setWrapLines(!wrapLines)}
+                    title={wrapLines ? "Disable word wrap" : "Enable word wrap"}
+                    className={`flex items-center justify-center h-7 w-8 rounded-lg cursor-pointer transition-colors ${
+                      wrapLines ? "text-blue-600 bg-blue-500/10 dark:text-blue-400 dark:bg-blue-500/20" : ""
+                    }`}
+                    style={{ color: wrapLines ? undefined : colors.muted }}
+                    onMouseEnter={e => { if (!wrapLines) e.currentTarget.style.background = colors.hover; }}
+                    onMouseLeave={e => { if (!wrapLines) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <WrapText className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={cycleFontSize}
+                    title={`Font size: ${codeFontSize}px (click to toggle)`}
+                    className="flex items-center gap-0.5 h-7 px-2 rounded-lg cursor-pointer transition-colors text-[11px] font-mono font-medium"
+                    style={{ color: colors.muted }}
+                    onMouseEnter={e => (e.currentTarget.style.background = colors.hover)}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <Type className="h-3 w-3" />
+                    <span>{codeFontSize}</span>
+                  </button>
+                </>
+              )}
+
+              {textContent !== null && (
+                <button
+                  onClick={handleCopyContent}
+                  title="Copy content to clipboard"
+                  className="flex items-center justify-center h-7 w-8 rounded-lg cursor-pointer transition-colors duration-150"
+                  style={{ color: colors.muted }}
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.hover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  {copiedCode ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </button>
+              )}
+
               {/* O2 Code Runner button — shown for runnable languages */}
               {canRunInO2 && (
                 <button
@@ -886,7 +1146,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
                   <span className="hidden sm:inline">Edit</span>
                 </button>
               )}
-              {isImage && (
+              {(isImage || isSvgImageView) && (
                 <button
                   onClick={() => setShowDetails(!showDetails)}
                   title="Toggle details"
@@ -982,8 +1242,8 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         {!loading && !error && (
           <div className="absolute inset-0">
 
-            {/* IMAGE */}
-            {isImage && contentUrl && (
+            {/* IMAGE / SVG VECTOR */}
+            {(isImage || isSvgImageView) && contentUrl && (
               <div className="w-full h-full flex relative overflow-hidden">
                 {/* Main Viewport */}
                 <div
@@ -1510,20 +1770,30 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
               />
             )}
 
-            {/* MARKDOWN */}
-            {isMarkdown && (
+            {/* MARKDOWN — Elevated Document Sheet */}
+            {isMarkdownPreview && (
               <div
-                className="absolute inset-0 overflow-y-auto px-8 py-8 md:px-16 pointer-events-auto select-text"
+                className="absolute inset-0 overflow-y-auto px-4 py-8 md:py-12 pointer-events-auto select-text flex justify-center"
                 style={{
                   scrollbarWidth: "thin",
-                  scrollbarColor: isDark ? "#334155 transparent" : "#cbd5e1 transparent",
-                  background: colors.bg,
+                  scrollbarColor: isDark ? "#333537 transparent" : "#e0e2e7 transparent",
+                  background: isDark ? "#131314" : "#f0f4f9",
                 }}
               >
                 <div
-                  className="prose prose-sm max-w-3xl mx-auto leading-relaxed"
-                  style={{ color: colors.text }}
-                  dangerouslySetInnerHTML={{ __html: markdownHtml! }}
+                  className="w-full max-w-4xl bg-white dark:bg-[#1e1f20] border border-[#e0e2e7] dark:border-[#333537] rounded-2xl shadow-sm p-8 md:p-14 my-auto min-h-full teledrive-markdown-body"
+                  dangerouslySetInnerHTML={{ __html: markdownHtml ?? "" }}
+                />
+              </div>
+            )}
+
+            {/* CSV / TSV — Interactive Spreadsheet Grid */}
+            {isTableView && textContent !== null && (
+              <div className="absolute inset-0">
+                <CsvTableViewer
+                  content={textContent}
+                  isTsv={isTsvFile}
+                  isDark={isDark}
                 />
               </div>
             )}
@@ -1539,50 +1809,88 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
               />
             )}
 
-            {/* CODE — Read Mode */}
+            {/* CODE / SOURCE — Read Mode */}
             {isCode && !isEditMode && (
               <SyntaxHighlighter
                 code={textContent!}
                 fileName={file.name}
+                wrapLines={wrapLines}
+                fontSize={codeFontSize}
                 className="absolute inset-0"
               />
             )}
 
-            {/* UNSUPPORTED */}
-            {!isImage && !isVideo && !isAudio && !isPdf && !isMarkdown && !isCode && (
-              <div className="w-full h-full flex items-center justify-center p-4">
+            {/* ARCHIVE PREVIEW CARD */}
+            {isArchive && !textContent && !contentUrl && (
+              <div className="w-full h-full flex items-center justify-center p-6">
                 <div
-                  className="flex flex-col items-center gap-4 text-center max-w-xs p-8 rounded-2xl"
-                  style={{ background: colors.fallbackBg, border: `1px solid ${colors.fallbackBdr}` }}
+                  className="flex flex-col items-center max-w-md w-full p-8 rounded-3xl text-center shadow-sm"
+                  style={{
+                    background: isDark ? "#1e1f20" : "#ffffff",
+                    border: `1px solid ${colors.border}`,
+                  }}
                 >
-                  <FallbackIcon
-                    className="h-14 w-14"
-                    style={{ color: colors.muted }}
-                    strokeWidth={1.5}
-                  />
-                  <div>
-                    <h4
-                      className="text-sm font-bold mb-1"
-                      style={{ color: colors.text }}
-                    >
-                      Preview not available
-                    </h4>
-                    <p className="text-xs leading-relaxed" style={{ color: colors.muted }}>
-                      Can't preview{" "}
-                      <code
-                        className="text-[11px] font-mono px-1 py-0.5 rounded"
-                        style={{ background: colors.badgeBg, color: colors.badgeText }}
-                      >
-                        {file.mime}
-                      </code>{" "}
-                      files.
-                    </p>
+                  <div className="h-16 w-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
+                    <FolderArchive className="h-8 w-8" />
                   </div>
+                  <h3 className="text-base font-bold mb-1 truncate max-w-full" style={{ color: colors.text }}>
+                    {file.name}
+                  </h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      {ext.toUpperCase()} ARCHIVE
+                    </span>
+                    <span className="text-[11px] font-mono" style={{ color: colors.muted }}>
+                      {formatSize(file.size)}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed mb-6" style={{ color: colors.muted }}>
+                    Compressed archives cannot be previewed directly in-browser. Download this archive to extract and view its contents on your computer.
+                  </p>
                   <button
                     onClick={handleDownload}
-                    className="px-5 py-2 rounded-xl text-[12px] font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors duration-150 cursor-pointer"
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-full text-xs font-semibold bg-[#0b57d0] hover:bg-[#0842a0] text-white shadow-xs transition-colors cursor-pointer"
                   >
-                    Download to View
+                    <Download className="h-4 w-4" />
+                    Download Archive
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* UNSUPPORTED BINARY FILE */}
+            {!isImage && !isSvgImageView && !isVideo && !isAudio && !isPdf && !isMarkdownPreview && !isTableView && !isCode && !isArchive && (
+              <div className="w-full h-full flex items-center justify-center p-6">
+                <div
+                  className="flex flex-col items-center max-w-md w-full p-8 rounded-3xl text-center shadow-sm"
+                  style={{
+                    background: isDark ? "#1e1f20" : "#ffffff",
+                    border: `1px solid ${colors.border}`,
+                  }}
+                >
+                  <div className="h-16 w-16 rounded-2xl bg-slate-100 dark:bg-[#282a2c] text-slate-500 dark:text-slate-400 flex items-center justify-center mb-4">
+                    <FallbackIcon className="h-8 w-8" strokeWidth={1.5} />
+                  </div>
+                  <h3 className="text-base font-bold mb-1 truncate max-w-full" style={{ color: colors.text }}>
+                    {file.name}
+                  </h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <code className="text-[11px] font-mono px-2 py-0.5 rounded-md font-semibold" style={{ background: colors.badgeBg, color: colors.badgeText }}>
+                      {file.mime || "application/octet-stream"}
+                    </code>
+                    <span className="text-[11px] font-mono" style={{ color: colors.muted }}>
+                      {formatSize(file.size)}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed mb-6" style={{ color: colors.muted }}>
+                    No preview is available for this file type. You can download and open it in a compatible application on your system.
+                  </p>
+                  <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-full text-xs font-semibold bg-[#0b57d0] hover:bg-[#0842a0] text-white shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download File
                   </button>
                 </div>
               </div>
@@ -1592,11 +1900,11 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       </div>
 
       {/* ── Status bar ───────────────────────────────────────────────────── */}
-      {(isCode || isMarkdown) && !loading && !error && (
+      {(isCode || isMarkdownFile || isTableData || isEditMode) && !loading && !error && textContent !== null && (
         <div
           className="flex items-center justify-between px-4 shrink-0 select-none"
           style={{
-            height: "24px",
+            height: "26px",
             background: colors.statusbar,
             borderTop: `1px solid ${colors.border}`,
           }}

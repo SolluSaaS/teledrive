@@ -232,3 +232,174 @@ img, svg {
   -webkit-user-drag: none;
   user-drag: none;
 }
+
+/* ==========================================================================
+   TeleDrive Rich Document & Markdown Engine Styling
+   ========================================================================== */
+.teledrive-markdown-body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.72;
+  word-break: break-word;
+}
+
+.teledrive-markdown-body h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1.6em;
+  margin-bottom: 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: -0.02em;
+  color: inherit;
+}
+
+.teledrive-markdown-body h1:first-child {
+  margin-top: 0;
+}
+
+.teledrive-markdown-body h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: -0.015em;
+  color: inherit;
+}
+
+.teledrive-markdown-body h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1.2em;
+  margin-bottom: 0.4em;
+  color: inherit;
+}
+
+.teledrive-markdown-body h4,
+.teledrive-markdown-body h5,
+.teledrive-markdown-body h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  color: inherit;
+}
+
+.teledrive-markdown-body p {
+  margin-top: 0;
+  margin-bottom: 1.1em;
+}
+
+.teledrive-markdown-body ul {
+  list-style-type: disc;
+  margin-top: 0.4em;
+  margin-bottom: 1.1em;
+  padding-left: 1.75em;
+}
+
+.teledrive-markdown-body ol {
+  list-style-type: decimal;
+  margin-top: 0.4em;
+  margin-bottom: 1.1em;
+  padding-left: 1.75em;
+}
+
+.teledrive-markdown-body li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.teledrive-markdown-body li > p {
+  margin-bottom: 0.4em;
+}
+
+.teledrive-markdown-body blockquote {
+  margin: 1.2em 0;
+  padding: 0.6em 1.25em;
+  border-left: 4px solid #0b57d0;
+  background: rgba(11, 87, 208, 0.05);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+:is(.dark) .teledrive-markdown-body blockquote {
+  border-left-color: #a8c7fa;
+  background: rgba(168, 199, 250, 0.06);
+}
+
+.teledrive-markdown-body code {
+  font-family: 'Geist Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.88em;
+  padding: 0.2em 0.45em;
+  border-radius: 0.375rem;
+  background: rgba(100, 116, 139, 0.12);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.teledrive-markdown-body pre {
+  margin: 1.3em 0;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  background: #f8fafd;
+  border: 1px solid var(--border);
+}
+:is(.dark) .teledrive-markdown-body pre {
+  background: #18191a;
+  border-color: #333537;
+}
+
+.teledrive-markdown-body pre code {
+  font-size: 0.9em;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.teledrive-markdown-body hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.teledrive-markdown-body table {
+  width: 100%;
+  margin: 1.4em 0;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.teledrive-markdown-body th {
+  padding: 0.65em 1em;
+  font-weight: 600;
+  text-align: left;
+  background: rgba(100, 116, 139, 0.08);
+  border: 1px solid var(--border);
+}
+
+.teledrive-markdown-body td {
+  padding: 0.6em 1em;
+  border: 1px solid var(--border);
+}
+
+.teledrive-markdown-body tr:nth-child(even) td {
+  background: rgba(100, 116, 139, 0.03);
+}
+
+.teledrive-markdown-body a {
+  color: #0b57d0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+:is(.dark) .teledrive-markdown-body a {
+  color: #a8c7fa;
+}
+
+.teledrive-markdown-body img {
+  max-width: 100%;
+  border-radius: 0.5rem;
+  margin: 1em 0;
+}

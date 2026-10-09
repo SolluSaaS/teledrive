@@ -101,10 +101,30 @@ const LANG_MAP: Record<string, LangInfo> = {
   dockerfile:{ hljsLang: "dockerfile",displayName: "Dockerfile",  cmLoader: null },
   makefile:  { hljsLang: "makefile",  displayName: "Makefile",    cmLoader: null },
 
-  // Plain text
+  // Plain text & Data
   txt: { hljsLang: "plaintext", displayName: "Plain Text", cmLoader: null },
   log: { hljsLang: "plaintext", displayName: "Log",        cmLoader: null },
   csv: { hljsLang: "plaintext", displayName: "CSV",        cmLoader: null },
+  tsv: { hljsLang: "plaintext", displayName: "TSV",        cmLoader: null },
+
+  // Specialized languages & formats
+  sol:     { hljsLang: "javascript", displayName: "Solidity",   cmLoader: null },
+  prisma:  { hljsLang: "javascript", displayName: "Prisma",     cmLoader: null },
+  zig:     { hljsLang: "c",          displayName: "Zig",        cmLoader: null },
+  nim:     { hljsLang: "python",     displayName: "Nim",        cmLoader: null },
+  tex:     { hljsLang: "latex",      displayName: "LaTeX",      cmLoader: null },
+  latex:   { hljsLang: "latex",      displayName: "LaTeX",      cmLoader: null },
+  bib:     { hljsLang: "latex",      displayName: "BibTeX",     cmLoader: null },
+  v:       { hljsLang: "verilog",    displayName: "Verilog",    cmLoader: null },
+  vhdl:    { hljsLang: "vhdl",       displayName: "VHDL",       cmLoader: null },
+  asm:     { hljsLang: "x86asm",     displayName: "Assembly",   cmLoader: null },
+  s:       { hljsLang: "x86asm",     displayName: "Assembly",   cmLoader: null },
+  diff:    { hljsLang: "diff",       displayName: "Diff",       cmLoader: null },
+  patch:   { hljsLang: "diff",       displayName: "Patch",      cmLoader: null },
+  srt:     { hljsLang: "plaintext",  displayName: "Subtitles",  cmLoader: null },
+  vtt:     { hljsLang: "plaintext",  displayName: "WebVTT",     cmLoader: null },
+  gradle:  { hljsLang: "java",       displayName: "Gradle",     cmLoader: null },
+  properties:{ hljsLang: "ini",      displayName: "Properties", cmLoader: null },
 };
 
 const FALLBACK: LangInfo = {
