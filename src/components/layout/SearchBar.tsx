@@ -65,6 +65,7 @@ export default function SearchBar() {
         <Search className="h-5 w-5 text-[#444746] dark:text-[#c4c7c5] mr-3 shrink-0" />
         
         <input
+          id="main-search-input"
           type="text"
           placeholder="Search in Drive"
           value={query}

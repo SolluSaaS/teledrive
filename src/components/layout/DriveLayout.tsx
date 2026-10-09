@@ -53,6 +53,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getModKey } from "@/lib/os";
 
 const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
 
@@ -61,6 +62,7 @@ export default function DriveLayout() {
   const location = useLocation();
   const isMobile = useIsMobile();
   const phoneNumber = useAuthStore((state) => state.phoneNumber);
+  const modKey = useMemo(() => getModKey(), []);
   
   const {
     moveMultipleFilesOrFolders,
@@ -929,7 +931,7 @@ export default function DriveLayout() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#444746] dark:text-[#c4c7c5]">Focus Search</span>
-                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">/ or ⌘F</kbd>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">/ or {modKey}F</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#444746] dark:text-[#c4c7c5]">Clear selection / blur</span>
@@ -955,7 +957,7 @@ export default function DriveLayout() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#444746] dark:text-[#c4c7c5]">Select all items</span>
-                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">⌘A</kbd>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{modKey}A</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#444746] dark:text-[#c4c7c5]">Move to Trash</span>
@@ -967,7 +969,7 @@ export default function DriveLayout() {
                 </div>
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[#444746] dark:text-[#c4c7c5]">Download file</span>
-                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">⌘D</kbd>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{modKey}D</kbd>
                 </div>
               </div>
             </div>

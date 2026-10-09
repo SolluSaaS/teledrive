@@ -32,3 +32,18 @@ initVault()
     console.error("main.tsx: Vault initialization failed in background:", err);
   });
 
+// In production, prevent the default browser context menu on empty window spaces
+// while preserving native input interactions, text selection, and Radix menus.
+if (!import.meta.env.DEV) {
+  document.addEventListener("contextmenu", (e) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest("input, textarea, [contenteditable='true'], [data-radix-menu-content], [data-radix-context-menu-trigger]") ||
+      (window.getSelection()?.toString().length ?? 0) > 0
+    ) {
+      return;
+    }
+    e.preventDefault();
+  });
+}
+

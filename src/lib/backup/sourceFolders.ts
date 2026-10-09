@@ -103,8 +103,16 @@ export const DEFAULT_EXCLUDES = [
   "**/Thumbs.db",
   "desktop.ini",
   "**/desktop.ini",
+  "ehthumbs.db",
+  "**/ehthumbs.db",
+  ".directory",
+  "**/.directory",
   "*.tmp",
   "**/*.tmp",
+  "*.bak",
+  "**/*.bak",
+  "*~",
+  "**/*~",
 ];
 
 /**

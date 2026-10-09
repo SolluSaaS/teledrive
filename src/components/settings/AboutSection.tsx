@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Bug, ShieldAlert, Check } from "lucide-react";
+import { Bug, ShieldAlert } from "lucide-react";
 
 const GithubIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 export default function AboutSection() {
-  const [version, setVersion] = useState("0.1.0");
+  const [version, setVersion] = useState("0.1.1");
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
@@ -52,11 +52,10 @@ export default function AboutSection() {
     setChecking(true);
     setTimeout(() => {
       setChecking(false);
-      toast("You're up to date!", {
-        icon: <Check className="h-4 w-4 text-green-500" />,
+      toast.success("You're up to date!", {
         description: `TeleDrive v${version} is the latest version.`,
       });
-    }, 1000);
+    }, 800);
   };
 
   return (

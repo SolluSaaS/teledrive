@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TeleDrive",
   "mainBinaryName": "TeleDrive",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.teledrive.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -18,7 +18,8 @@
         "width": 1200,
         "height": 800,
         "minWidth": 375,
-        "minHeight": 600
+        "minHeight": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -35,6 +36,37 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "copyright": "Copyright © 2026 TeleDrive. All rights reserved.",
+    "category": "Utility",
+    "shortDescription": "Fast, unlimited cloud storage powered by Telegram",
+    "longDescription": "TeleDrive is a modern, cross-platform desktop cloud storage client leveraging the Telegram API for secure, fast, and free storage.",
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "dmg": {
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "languages": ["English"],
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
     "android": {
       "minSdkVersion": 24
     }

@@ -22,12 +22,16 @@ export function isJunkFile(
     return true;
   }
 
-  // 2. OS metadata / junk
+  // 2. OS metadata / junk (macOS, Windows, Linux)
   if (
     name === ".DS_Store" ||
     name.startsWith("._") ||
     name === "Thumbs.db" ||
-    name === "desktop.ini"
+    name === "desktop.ini" ||
+    name === "ehthumbs.db" ||
+    name === ".directory" ||
+    name.startsWith(".Trash-") ||
+    name.endsWith("~")
   ) {
     return true;
   }

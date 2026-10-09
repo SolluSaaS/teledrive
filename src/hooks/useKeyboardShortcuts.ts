@@ -83,7 +83,8 @@ export function useKeyboardShortcuts({ onToggleHelp }: KeyboardShortcutsProps) {
       // 1. Focus Search: "/" or "Ctrl+F" / "Cmd+F"
       if (e.key === "/" || (isCmd && e.key.toLowerCase() === "f")) {
         e.preventDefault();
-        const searchInput = document.querySelector('input[placeholder="Search in TeleDrive"]') as HTMLInputElement;
+        const searchInput = (document.getElementById("main-search-input") ||
+          document.querySelector('input[placeholder*="Search"]')) as HTMLInputElement | null;
         if (searchInput) {
           searchInput.focus();
           searchInput.select();

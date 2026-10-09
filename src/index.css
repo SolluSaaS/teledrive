@@ -403,3 +403,190 @@ img, svg {
   border-radius: 0.5rem;
   margin: 1em 0;
 }
+
+/* ==========================================================================
+   TeleDrive / Google Drive Impeccable Toast Notification System
+   ========================================================================== */
+
+[data-sonner-toaster] {
+  font-family: var(--font-sans) !important;
+  z-index: 99999 !important;
+}
+
+[data-sonner-toast].teledrive-toast {
+  padding: 12px 16px !important;
+  border-radius: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 320px !important;
+  max-width: 440px !important;
+  font-family: var(--font-sans) !important;
+  
+  /* Light mode: crisp porcelain card with glassmorphism and subtle elevation */
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.1),
+              0 4px 8px -2px rgba(15, 23, 42, 0.04),
+              0 0 0 1px rgba(0, 0, 0, 0.02) !important;
+  color: #1f1f1f !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Dark mode toast styling */
+:is(.dark) [data-sonner-toast].teledrive-toast,
+[data-sonner-toaster][data-sonner-theme="dark"] [data-sonner-toast].teledrive-toast {
+  background: rgba(30, 31, 32, 0.96) !important;
+  border: 1px solid rgba(60, 64, 67, 0.8) !important;
+  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55),
+              0 6px 14px -2px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  color: #f1f3f4 !important;
+}
+
+/* Icon container reset so custom icon badge isn't crushed to 16px */
+[data-sonner-toast].teledrive-toast [data-icon] {
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+/* Toast content container */
+[data-sonner-toast].teledrive-toast [data-content] {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+/* Toast title typography */
+[data-sonner-toast].teledrive-toast .teledrive-toast-title,
+[data-sonner-toast].teledrive-toast [data-title] {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+  letter-spacing: -0.01em !important;
+  color: #1f1f1f !important;
+}
+
+:is(.dark) [data-sonner-toast].teledrive-toast .teledrive-toast-title,
+:is(.dark) [data-sonner-toast].teledrive-toast [data-title],
+[data-sonner-toaster][data-sonner-theme="dark"] [data-sonner-toast].teledrive-toast [data-title] {
+  color: #f1f3f4 !important;
+}
+
+/* Toast description typography with high contrast */
+[data-sonner-toast].teledrive-toast .teledrive-toast-description,
+[data-sonner-toast].teledrive-toast [data-description] {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.45 !important;
+  color: #444746 !important;
+}
+
+:is(.dark) [data-sonner-toast].teledrive-toast .teledrive-toast-description,
+:is(.dark) [data-sonner-toast].teledrive-toast [data-description],
+[data-sonner-toaster][data-sonner-theme="dark"] [data-sonner-toast].teledrive-toast [data-description] {
+  color: #c4c7c5 !important;
+}
+
+/* Type-specific border glows */
+[data-sonner-toast][data-type="success"].teledrive-toast {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+:is(.dark) [data-sonner-toast][data-type="success"].teledrive-toast {
+  border-color: rgba(16, 185, 129, 0.45) !important;
+}
+
+[data-sonner-toast][data-type="error"].teledrive-toast {
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}
+:is(.dark) [data-sonner-toast][data-type="error"].teledrive-toast {
+  border-color: rgba(239, 68, 68, 0.45) !important;
+}
+
+[data-sonner-toast][data-type="warning"].teledrive-toast {
+  border-color: rgba(245, 158, 11, 0.4) !important;
+}
+:is(.dark) [data-sonner-toast][data-type="warning"].teledrive-toast {
+  border-color: rgba(245, 158, 11, 0.45) !important;
+}
+
+[data-sonner-toast][data-type="info"].teledrive-toast,
+[data-sonner-toast][data-type="loading"].teledrive-toast {
+  border-color: rgba(11, 87, 208, 0.35) !important;
+}
+:is(.dark) [data-sonner-toast][data-type="info"].teledrive-toast,
+:is(.dark) [data-sonner-toast][data-type="loading"].teledrive-toast {
+  border-color: rgba(168, 199, 250, 0.4) !important;
+}
+
+/* Elegant close button */
+[data-sonner-toast].teledrive-toast [data-close-button] {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  left: auto !important;
+  transform: none !important;
+  height: 22px !important;
+  width: 22px !important;
+  border-radius: 9999px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #747775 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 0.6;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+}
+
+[data-sonner-toast].teledrive-toast:hover [data-close-button] {
+  opacity: 1 !important;
+}
+
+[data-sonner-toast].teledrive-toast [data-close-button]:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: #1f1f1f !important;
+}
+
+:is(.dark) [data-sonner-toast].teledrive-toast [data-close-button]:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+/* Button & Action styling */
+[data-sonner-toast].teledrive-toast [data-button] {
+  height: 28px !important;
+  padding: 0 12px !important;
+  border-radius: 9999px !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  background: #0b57d0 !important;
+  color: #ffffff !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+}
+
+[data-sonner-toast].teledrive-toast [data-button]:hover {
+  background: #0842a0 !important;
+}
+
+:is(.dark) [data-sonner-toast].teledrive-toast [data-button] {
+  background: #a8c7fa !important;
+  color: #041e49 !important;
+}
+
+:is(.dark) [data-sonner-toast].teledrive-toast [data-button]:hover {
+  background: #d3e3fd !important;
+}
+

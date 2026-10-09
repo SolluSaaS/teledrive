@@ -144,7 +144,7 @@ export default function BackupSection() {
 
   async function handleRunNow() {
     if (paths.length === 0) {
-      toast("Pick at least one source folder first");
+      toast.warning("Pick at least one source folder first");
       return;
     }
     try {
