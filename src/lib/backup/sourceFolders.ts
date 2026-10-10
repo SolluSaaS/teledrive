@@ -86,9 +86,38 @@ export function globToRegex(pattern: string): RegExp | null {
   }
 }
 
+export const DEFAULT_EXCLUDES = [
+  ".git",
+  ".git/**",
+  "**/.git",
+  "**/.git/**",
+  ".DS_Store",
+  "**/.DS_Store",
+  "._*",
+  "**/._*",
+  "node_modules",
+  "node_modules/**",
+  "**/node_modules",
+  "**/node_modules/**",
+  "Thumbs.db",
+  "**/Thumbs.db",
+  "desktop.ini",
+  "**/desktop.ini",
+  "ehthumbs.db",
+  "**/ehthumbs.db",
+  ".directory",
+  "**/.directory",
+  "*.tmp",
+  "**/*.tmp",
+  "*.bak",
+  "**/*.bak",
+  "*~",
+  "**/*~",
+];
+
 /**
  * Test whether a single relative path matches any of the user's exclude
- * patterns. Used by the walker to skip files/directories.
+ * patterns or default system excludes. Used by the walker to skip files/directories.
  *
  * @param relPath  Path relative to the source-folder root, with forward slashes.
  *                 Example: `node_modules/foo/index.js` or `Documents/report.pdf`.
@@ -99,7 +128,8 @@ export function pathMatchesExclude(
   excludes: string[],
 ): ExcludeMatch {
   const normalized = normalizeRelativePath(relPath);
-  for (const pattern of excludes) {
+  const allPatterns = [...DEFAULT_EXCLUDES, ...(excludes || [])];
+  for (const pattern of allPatterns) {
     const re = globToRegex(pattern);
     if (re && re.test(normalized)) {
       return { matches: true, pattern };

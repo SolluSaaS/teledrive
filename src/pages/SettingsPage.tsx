@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Smartphone, Eye, HardDrive, Info, CreditCard } from "lucide-react";
+import { ArrowLeft, Smartphone, Eye, HardDrive, Info, Shield } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Button } from "@/components/ui/button";
 import TelegramAccountSection from "@/components/settings/TelegramAccountSection";
-import PlanSection from "@/components/settings/PlanSection";
 import AppearanceSection from "@/components/settings/AppearanceSection";
 import StorageSection from "@/components/settings/StorageSection";
+import BackupSection from "@/components/settings/BackupSection";
 import AboutSection from "@/components/settings/AboutSection";
 
-type SectionType = "account" | "plan" | "appearance" | "storage" | "about";
+type SectionType = "account" | "appearance" | "storage" | "backup" | "about";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -29,10 +29,10 @@ export default function SettingsPage() {
       component: TelegramAccountSection,
     },
     {
-      id: "plan" as const,
-      label: "Plan & Devices",
-      icon: CreditCard,
-      component: PlanSection,
+      id: "backup" as const,
+      label: "Device Backup",
+      icon: Shield,
+      component: BackupSection,
     },
     {
       id: "appearance" as const,
@@ -115,11 +115,7 @@ export default function SettingsPage() {
         bootstrapComplete: false,
       });
 
-      // Step 5: Wipe backend license session (best-effort).
-      const { useLicenseStore } = await import("@/stores/licenseStore");
-      await useLicenseStore.getState().logoutFromBackend().catch((err) => {
-        console.warn("Backend logout failed (non-fatal):", err);
-      });
+      // (Backend license session removed — nothing to wipe)
     } catch (err) {
       console.error("Logout error:", err);
     } finally {
@@ -130,16 +126,13 @@ export default function SettingsPage() {
 
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground relative">
-      {/* Decorative ambient background blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/5 dark:bg-brand-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[8000ms]" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/5 dark:bg-indigo-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[12000ms]" />
+    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground select-none">
       {/* Topbar Settings Header */}
-      <header className="flex items-center gap-4 border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
+      <header className="flex items-center gap-3 px-4 md:px-6 h-16 shrink-0 bg-background border-b md:border-b-0 border-slate-200/60 dark:border-slate-800/60">
         <Button
           variant="ghost"
           size="icon"
-          className="rounded-full hover:bg-muted cursor-pointer"
+          className="rounded-full h-10 w-10 hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] text-[#444746] dark:text-[#C4C7C5] hover:text-[#1F1F1F] dark:hover:text-[#E3E3E3] cursor-pointer transition-colors"
           onClick={() => {
             if (isMobile && mobileShowContent) {
               setMobileShowContent(false);
@@ -147,18 +140,22 @@ export default function SettingsPage() {
               navigate("/drive/my-drive");
             }
           }}
+          title="Back to Drive"
         >
-          <ArrowLeft className="h-5 w-5 text-slate-600 dark:text-slate-400" />
+          <ArrowLeft className="h-5 w-5" />
         </Button>
-        <h2 className="text-base font-extrabold tracking-tight">Settings</h2>
+        <div className="flex items-center gap-2.5">
+          <img src="/teledrive.png" alt="TeleDrive" className="h-7 w-7 object-contain" />
+          <h2 className="text-lg font-semibold tracking-tight text-[#1F1F1F] dark:text-[#E3E3E3]">Settings</h2>
+        </div>
       </header>
 
       {/* Main settings body */}
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop Split View: Nav List */}
         {(!isMobile || !mobileShowContent) && (
-          <aside className="w-full md:w-[260px] md:border-r bg-slate-50/10 dark:bg-slate-950/10 backdrop-blur-md shrink-0 overflow-y-auto border-slate-200/60 dark:border-slate-800/80 flex flex-col z-10">
-            <div className="flex-1 p-3 space-y-1.5">
+          <aside className="w-full md:w-64 shrink-0 overflow-y-auto px-3 py-2 flex flex-col justify-between">
+            <div className="space-y-1">
               {sections.map((sec) => {
                 const Icon = sec.icon;
                 const isSelected = activeSection === sec.id;
@@ -166,16 +163,13 @@ export default function SettingsPage() {
                   <button
                     key={sec.id}
                     onClick={() => (isMobile ? handleMobileSelect(sec.id) : setActiveSection(sec.id))}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-left relative group cursor-pointer ${
+                    className={`w-full flex items-center gap-3.5 px-4 h-10 rounded-full text-sm font-medium transition-colors text-left cursor-pointer ${
                       isSelected && !isMobile
-                        ? "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
-                        : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border border-transparent hover:translate-x-0.5"
+                        ? "bg-[#C2E7FF] dark:bg-[#004A77] text-[#001D35] dark:text-[#C2E7FF] font-semibold"
+                        : "text-[#444746] dark:text-[#C4C7C5] hover:bg-[#F0F4F9] dark:hover:bg-[#282A2C] hover:text-[#1F1F1F] dark:hover:text-[#E3E3E3]"
                     }`}
                   >
-                    {isSelected && !isMobile && (
-                      <div className="absolute left-0 top-3 bottom-3 w-1 bg-brand-500 rounded-r-full shadow-[0_0_8px_rgba(26,115,232,0.6)]" />
-                    )}
-                    <Icon className={`h-4.5 w-4.5 shrink-0 transition-transform duration-200 ${isSelected && !isMobile ? "text-brand-500 scale-105" : "text-muted-foreground group-hover:text-foreground"}`} />
+                    <Icon className={`h-4.5 w-4.5 shrink-0 ${isSelected && !isMobile ? "text-[#0B57D0] dark:text-[#A8C7FA]" : "text-[#444746] dark:text-[#C4C7C5]"}`} />
                     <span>{sec.label}</span>
                   </button>
                 );
@@ -183,13 +177,13 @@ export default function SettingsPage() {
             </div>
 
             {/* Logout button pinned to bottom of sidebar */}
-            <div className="p-3 border-t border-slate-200 dark:border-slate-800/80 shrink-0">
+            <div className="pt-4 border-t border-slate-200/60 dark:border-slate-800/60 mb-2">
               <button
                 onClick={() => setLogoutDialogOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-left group cursor-pointer text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 border border-transparent hover:border-red-200 dark:hover:border-red-900/40 hover:translate-x-0.5"
+                className="w-full flex items-center gap-3.5 px-4 h-10 rounded-full text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors text-left cursor-pointer"
               >
                 <svg
-                  className="h-4.5 w-4.5 shrink-0 text-red-500"
+                  className="h-4.5 w-4.5 shrink-0 text-rose-500"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -209,9 +203,11 @@ export default function SettingsPage() {
 
         {/* Settings Panel Content Area */}
         {(!isMobile || mobileShowContent) && (
-          <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-background/40 dark:bg-slate-950/30 backdrop-blur-md z-10">
-            <div key={activeSection} className="max-w-2xl animate-slide-up-fade">
-              <ActiveComponent />
+          <div className="flex-1 overflow-hidden md:mr-4 md:mb-4 md:rounded-3xl bg-surface dark:bg-[#1E1F20] border md:border-slate-200/60 dark:border-slate-800/60 shadow-xs flex flex-col">
+            <div className="flex-1 overflow-y-auto p-6 md:p-8">
+              <div key={activeSection} className="max-w-3xl animate-fade-in">
+                <ActiveComponent />
+              </div>
             </div>
           </div>
         )}
@@ -222,15 +218,15 @@ export default function SettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40 backdrop-blur-xs"
             onClick={() => !isLoggingOut && setLogoutDialogOpen(false)}
           />
           {/* Dialog card */}
-          <div className="relative z-10 w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-6 animate-in fade-in zoom-in-95 duration-200">
+          <div className="relative z-10 w-full max-w-sm bg-surface dark:bg-[#282A2C] border border-slate-200 dark:border-slate-700 rounded-3xl shadow-2xl p-6 animate-in fade-in zoom-in-95 duration-200">
             {/* Icon */}
-            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/40 mx-auto mb-4">
+            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 mx-auto mb-4">
               <svg
-                className="h-6 w-6 text-red-500"
+                className="h-6 w-6"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -244,24 +240,24 @@ export default function SettingsPage() {
               </svg>
             </div>
 
-            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 text-center mb-1.5">
+            <h3 className="text-base font-semibold text-[#1F1F1F] dark:text-[#E3E3E3] text-center mb-1.5">
               Log Out
             </h3>
-            <p className="text-sm text-muted-foreground text-center leading-relaxed mb-6">
+            <p className="text-sm text-[#444746] dark:text-[#C4C7C5] text-center leading-relaxed mb-6">
               You will be signed out of your Telegram account. Your files will remain safe in your storage channel.
             </p>
 
             <div className="flex gap-3">
               <Button
                 variant="outline"
-                className="flex-1 rounded-xl h-10 text-sm font-semibold border-slate-200 dark:border-slate-800"
+                className="flex-1 rounded-full h-10 text-sm font-medium border-slate-300 dark:border-slate-600 hover:bg-[#F0F4F9] dark:hover:bg-[#333537]"
                 disabled={isLoggingOut}
                 onClick={() => setLogoutDialogOpen(false)}
               >
                 Cancel
               </Button>
               <Button
-                className="flex-1 rounded-xl h-10 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white border-0 shadow-sm"
+                className="flex-1 rounded-full h-10 text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white border-0 shadow-sm"
                 disabled={isLoggingOut}
                 onClick={handleLogout}
               >

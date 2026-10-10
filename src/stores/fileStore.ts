@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { TeleFile, UploadItem } from "../lib/types";
+import { filterJunkFiles } from "../lib/storage/fileSanitizer";
 
 export type IndexQueueState =
   | "idle"
@@ -90,7 +91,8 @@ interface FileState {
 const getInitialFiles = (): TeleFile[] => {
   try {
     const cached = localStorage.getItem("teledrive_cached_files");
-    return cached ? JSON.parse(cached) : [];
+    if (!cached) return [];
+    return filterJunkFiles(JSON.parse(cached));
   } catch (err) {
     console.warn("[fileStore] Failed to load cached files from localStorage:", err);
     return [];
@@ -111,8 +113,13 @@ const debouncedCacheFiles = (files: TeleFile[]) => {
 
 const SNAPSHOT_RING_LIMIT = 3;
 
+const initialFiles = getInitialFiles();
+const wasBootstrapCompleted =
+  typeof sessionStorage !== "undefined" &&
+  sessionStorage.getItem("teledrive_bootstrap_done") === "true";
+
 export const useFileStore = create<FileState>((set, get) => ({
-  files: getInitialFiles(),
+  files: initialFiles,
   currentFolder: "/",
   selectedIds: [],
   selectedIdsSet: new Set<string>(),
@@ -125,11 +132,12 @@ export const useFileStore = create<FileState>((set, get) => ({
   indexQueueState: "idle",
   indexQueueRetryInSec: 0,
   indexQueueError: null,
-  bootstrapComplete: false,
+  bootstrapComplete: initialFiles.length > 0 || wasBootstrapCompleted,
   lastIndexMsgId: 0,
   lastRemoteSyncAt: null,
   lastBackupAt: null,
-  setFiles: (files) => {
+  setFiles: (rawFiles) => {
+    const files = filterJunkFiles(rawFiles);
     debouncedCacheFiles(files);
     set({ files });
   },
@@ -185,7 +193,12 @@ export const useFileStore = create<FileState>((set, get) => ({
   setIndexQueueRetryInSec: (indexQueueRetryInSec) =>
     set({ indexQueueRetryInSec }),
   setIndexQueueError: (indexQueueError) => set({ indexQueueError }),
-  setBootstrapComplete: (bootstrapComplete) => set({ bootstrapComplete }),
+  setBootstrapComplete: (bootstrapComplete) => {
+    if (bootstrapComplete && typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem("teledrive_bootstrap_done", "true");
+    }
+    set({ bootstrapComplete });
+  },
   /**
    * Merge new files arriving from another device's sync poll (or any other
    * read-only delta source) into the in-memory file list WITHOUT triggering
@@ -201,19 +214,13 @@ export const useFileStore = create<FileState>((set, get) => ({
    * so callers don't need to handle any queueing.
    */
   setRemoteDelta: async (remoteFiles: TeleFile[]) => {
-    if (remoteFiles.length === 0) return;
+    const cleanRemote = filterJunkFiles(remoteFiles);
+    if (cleanRemote.length === 0) return;
     const { dedupeByMessageId, collapseDuplicateFolders } = await import(
       "../lib/storage/metadataStore"
     );
     set((state) => {
-      // Same dedup chain as healAndSave (metadataStore.ts). Previously this
-      // only called dedupeByMessageId, which SKIPS folders — so two folder
-      // entries with the same full path but different ids (one created on
-      // device A with `folder_<hash>`, one created on device B with a
-      // random id) both ended up in the in-memory store and the renderer
-      // showed them as two cards.
-      const merged = collapseDuplicateFolders(dedupeByMessageId([...state.files, ...remoteFiles]));
-      // Cheap O(n) early-out: same length ⇒ nothing actually changed.
+      const merged = filterJunkFiles(collapseDuplicateFolders(dedupeByMessageId([...state.files, ...cleanRemote])));
       if (merged.length === state.files.length) return state;
       debouncedCacheFiles(merged);
       return {

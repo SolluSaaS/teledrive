@@ -42,9 +42,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useBackupProgressStore } from "@/stores/backupProgressStore";
 import { getClient } from "../telegram/client";
 import { getSecret, VAULT_KEY_CHANNEL_ID, channelIdKey } from "../secure/vault";
-import { recordBackupJob } from "@/lib/api";
 import { logEvent } from "../events";
-import { useBackupFolders } from "@/hooks/useBackupFolders";
 import {
   diffAgainstManifest,
   emptyManifest,
@@ -290,19 +288,6 @@ async function runBackupInner(opts: RunBackupOptions): Promise<BackupRunResult> 
   // The full keying is the root's normalized absolute path, so re-running
   // the same config produces the same display name (idempotent).
   const rootDisplayBasename = buildRootDisplayNames(folders.paths);
-
-  // Guard: PRO gate. The UI also gates, but the runner is reachable from
-  // the Rust timer tick — so check here too.
-  const isPro = useLicenseStore.getState().plan === "PRO";
-  if (!isPro) {
-    return {
-      ...baseResult,
-      error: "Device backup is a Pro feature.",
-      status: "failed",
-      durationMs: Date.now() - startedAt,
-      finishedAt: Date.now(),
-    };
-  }
 
   const channelId = await resolveChannelId();
   if (!channelId) {
@@ -673,31 +658,9 @@ async function runBackupInner(opts: RunBackupOptions): Promise<BackupRunResult> 
   else if (filesUploaded > 0) status = "success";
   else status = "success"; // no-op run: nothing to upload, nothing failed
 
-  // Post audit row. Use the scheduledFor = start time so two runs in the
-  // same second dedupe (matches the existing takeSnapshot semantics).
-  const scheduledFor = new Date(Math.floor(startedAt / 1000) * 1000);
-  let auditJobId: string | null = null;
-  try {
-    const auditRes = await recordBackupJob({
-      scheduledFor: scheduledFor.toISOString(),
-      channelId,
-      snapshotMessageId: null,
-      fileCount: filesUploaded,
-      totalBytes: walked
-        .filter((w) => manifest.entries[w.absPath])
-        .reduce((acc, w) => acc + (Number(w.size) || 0), 0),
-      triggeredBy: opts.triggeredBy,
-      // The backend's audit-row status enum is binary (success | failed).
-      // A "partial" run (some uploads succeeded, some failed) is recorded
-      // here as "success" — the activity log + UI toasts already surface
-      // the partial nature via filesFailed > 0.
-      status: status === "partial" ? "success" : status,
-      error: firstError,
-    });
-    auditJobId = (auditRes as { id?: string } | undefined)?.id ?? null;
-  } catch (err) {
-    console.warn("[backup.runner] audit POST failed (non-fatal):", err);
-  }
+  // Audit job id — backend removed, set null.
+  const auditJobId: string | null = null;
+  void auditJobId; // unused but kept for structural compatibility
 
   // Log an event for the activity timeline.
   try {
@@ -799,6 +762,3 @@ function stripPrefix(absPath: string, prefix: string): string {
 // Re-export for the React hook.
 export { emptyManifest };
 export type { BackupManifest };
-// Suppress unused-warning for the helper that mirrors useBackupFolders for
-// callers that don't go through the React layer.
-void useBackupFolders;

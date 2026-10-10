@@ -8,8 +8,6 @@ import { initClient, getClient } from "@/lib/telegram/client";
 import { saveSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
 import { DEFAULT_API_ID, DEFAULT_API_HASH } from "@/lib/telegram/config";
-import { useLicenseStore } from "@/stores/licenseStore";
-import { detectOS, getDeviceName } from "@/lib/secure/deviceInfo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -256,75 +254,6 @@ export default function AuthPage() {
       console.warn("Stronghold saveSecret failed (non-fatal):", vaultErr);
     }
 
-    // ── Backend license login (best-effort, non-blocking) ──────────────────
-    // We log in to the license server so this device is recorded under the
-    // user's account and so we get a JWT for future authenticated calls.
-    // Failures (backend down, network error) only warn — bootstrap still
-    // proceeds and the user can refresh in Settings → Plan & Devices later.
-    //
-    // IMPORTANT: telegramUserId must be the REAL Telegram user ID returned
-    // by Telegram's auth.getMe (a numeric ID like 1234567890), NOT the phone
-    // digits. The phone digit string is what the user previously sent,
-    // which (a) wasn't a stable identifier for the user across Telegram
-    // accounts sharing a phone, and (b) caused a fresh User row on the
-    // backend every time the phone was re-entered with different formatting.
-    try {
-      let telegramUserId: string;
-      try {
-        const me = await client.getMe();
-        // GramJS returns a User object whose .id is a bigint-like numeric.
-        // Normalize to a base-10 string that matches what `auth.getMe` would
-        // return server-side and what the backend expects in its zod schema
-        // (digits-only, 1..64 chars).
-        telegramUserId = String((me as any)?.id ?? "");
-        if (!/^\d{1,64}$/.test(telegramUserId)) {
-          throw new Error(
-            `getMe returned non-numeric id: ${JSON.stringify(telegramUserId).slice(0, 80)}`
-          );
-        }
-      } catch (meErr) {
-        // Hard fallback: phone digits. This MUST still produce a stable
-        // value for the SAME login flow so we don't create a duplicate
-        // user — but we'll also retry getMe() once after a short delay
-        // because some GramJS builds race the auth response.
-        console.warn("[AuthPage] client.getMe() failed, falling back to phone digits:", meErr);
-        telegramUserId = phone.trim().replace(/[^\d]/g, "");
-        await new Promise((r) => setTimeout(r, 250));
-        try {
-          const me2 = await client.getMe();
-          const retry = String((me2 as any)?.id ?? "");
-          if (/^\d{1,64}$/.test(retry)) {
-            telegramUserId = retry;
-          }
-        } catch {
-          // keep phone-digits fallback
-        }
-      }
-
-      await invoke("log_vault_state", {
-        state: `BACKEND_LOGIN_START telegramUserId=${telegramUserId} phone=${phone.trim()}`,
-      }).catch(() => {});
-
-      await useLicenseStore.getState().loginToBackend({
-        telegramUserId,
-        phoneNumber: phone.trim(),
-        deviceName: getDeviceName(),
-        os: detectOS(),
-      });
-      if (useLicenseStore.getState().backendReachable) {
-        toast.success("Connected to license server");
-      } else {
-        await invoke("log_vault_state", {
-          state: `BACKEND_LOGIN_UNREACHABLE after loginToBackend (will retry on next cold start)`,
-        }).catch(() => {});
-      }
-    } catch (backendErr) {
-      console.warn("Backend license login failed (non-fatal):", backendErr);
-      await invoke("log_vault_state", {
-        state: `BACKEND_LOGIN_ERR: ${backendErr instanceof Error ? backendErr.message : String(backendErr)}`,
-      }).catch(() => {});
-    }
-
     // ── Bootstrap (load Telegram index → set files in store) ───────────────
     // Run inline BEFORE `setSession` so the AuthPage stays mounted through
     // the whole flow. If we set `isAuthenticated=true` first, the GuestRoute
@@ -362,46 +291,34 @@ export default function AuthPage() {
 
   if (checkingConfig) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
-        {/* Decorative background blobs */}
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/10 dark:bg-brand-500/15 blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/10 dark:bg-indigo-500/15 blur-[120px] pointer-events-none" />
-        <div className="relative flex flex-col items-center gap-3">
-          <Loader2 className="h-9 w-9 animate-spin text-brand-500" />
-          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Loading Configuration...</span>
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground select-none">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-9 w-9 animate-spin text-[#0B57D0] dark:text-[#A8C7FA]" />
+          <span className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">Loading Configuration...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 p-4 relative overflow-hidden">
-      {/* Decorative ambient background blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/8 dark:bg-brand-500/12 blur-[130px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/8 dark:bg-indigo-500/12 blur-[130px] pointer-events-none" />
-
-      <Card className="w-full max-w-md p-7 bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 shadow-2xl rounded-2xl relative z-10 animate-fade-in transition-all">
-        <div className="text-center mb-8 flex flex-col items-center">
-          <Link to="/drive/my-drive" className="inline-flex items-center gap-2.5 mb-2 group">
-            <div className="relative">
-              <div className="absolute inset-0 bg-brand-500/30 blur-md rounded-xl group-hover:bg-brand-500/40 transition-all duration-300" />
-              <img
-                src="/teledrive.png"
-                alt="TeleDrive Logo"
-                className="relative h-11 w-11 object-contain rounded-xl shadow-md shrink-0 transition-transform duration-300 group-hover:scale-105"
-              />
-            </div>
-            <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+    <div className="flex items-center justify-center min-h-screen bg-background text-foreground p-4 relative select-none">
+      <Card className="w-full max-w-md p-8 md:p-10 bg-surface dark:bg-[#1E1F20] border border-slate-200/80 dark:border-slate-800/80 shadow-md rounded-3xl relative z-10 animate-fade-in transition-all">
+        <div className="text-center mb-6 flex flex-col items-center">
+          <Link to="/drive/my-drive" className="inline-flex items-center gap-2.5 mb-3 group">
+            <img
+              src="/teledrive.png"
+              alt="TeleDrive Logo"
+              className="h-10 w-10 object-contain"
+            />
+            <span className="text-2xl font-semibold tracking-tight text-[#1F1F1F] dark:text-[#E3E3E3]">
               TeleDrive
             </span>
           </Link>
 
-          {/* Warning placeholder replaced with clean layout spacing */}
-
           {error && (
-            <div className="w-full flex gap-2.5 p-3.5 rounded-xl border border-red-200 bg-red-50/50 dark:border-red-950/40 dark:bg-red-950/20 text-red-650 dark:text-red-400 text-xs text-left mb-2 animate-fade-in">
-              <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5" />
-              <span className="leading-relaxed font-semibold">{error}</span>
+            <div className="w-full flex gap-2.5 p-3 rounded-2xl border border-rose-200 bg-rose-50/60 dark:border-rose-900/40 dark:bg-rose-950/20 text-rose-650 dark:text-rose-400 text-xs text-left mb-2 animate-fade-in">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-500" />
+              <span className="leading-relaxed font-medium">{error}</span>
             </div>
           )}
         </div>
@@ -409,30 +326,32 @@ export default function AuthPage() {
         {/* STEP 1: Phone number input */}
         {step === "phone" && (
           <form onSubmit={handleSendCode} className="space-y-5 animate-slide-up-fade">
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Sign in with Telegram</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Enter your Telegram phone number (with country code) to request a verification code.
+            <div className="text-center space-y-1 mb-6">
+              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Sign in</h3>
+              <p className="text-sm text-[#444746] dark:text-[#C4C7C5]">
+                Use your Telegram account to continue to TeleDrive
               </p>
             </div>
 
-            <div className="space-y-2 mt-4">
-              <Label htmlFor="phone-number" className="text-xs font-bold text-slate-600 dark:text-slate-355 uppercase tracking-wider">Phone number</Label>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number" className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">
+                Phone number
+              </Label>
               <Input
                 id="phone-number"
                 type="tel"
-                placeholder="e.g. +1 555-0199"
+                placeholder="+1 555-0199"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 disabled={loading}
-                className="rounded-xl h-11 border-slate-200 dark:border-slate-800 focus-visible:ring-brand-500 focus-visible:border-brand-500 bg-slate-50/50 dark:bg-slate-900/30 focus-visible:ring-2 transition-all duration-200"
+                className="rounded-xl h-12 border-slate-300 dark:border-slate-600 focus-visible:ring-[#0B57D0] focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all text-sm"
               />
             </div>
 
             <Button
               type="submit"
               disabled={loading || !phone.trim()}
-              className="w-full h-11 rounded-xl bg-brand-500 hover:bg-brand-600 font-bold shadow-md shadow-brand-500/10 active:scale-[0.98] transition-all cursor-pointer"
+              className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
             >
               {loading ? (
                 <>
@@ -440,7 +359,7 @@ export default function AuthPage() {
                   Sending code...
                 </>
               ) : (
-                "Send Code"
+                "Next"
               )}
             </Button>
           </form>
@@ -449,10 +368,10 @@ export default function AuthPage() {
         {/* STEP 2: OTP verification code */}
         {step === "otp" && (
           <form onSubmit={handleVerifyOTP} className="space-y-6 animate-slide-up-fade">
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Enter the code</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Telegram sent a 5-digit verification code to your active sessions or mobile. Enter it below.
+            <div className="text-center space-y-1">
+              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Verification code</h3>
+              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
+                Telegram sent a code to your other devices or SMS for <strong className="text-[#1F1F1F] dark:text-[#E3E3E3]">{phone}</strong>
               </p>
             </div>
 
@@ -470,16 +389,16 @@ export default function AuthPage() {
                   onKeyDown={(e) => handleOtpKeyDown(idx, e)}
                   onPaste={handleOtpPaste}
                   disabled={loading}
-                  className="w-12 h-14 text-center font-extrabold text-xl rounded-xl border-slate-200/80 dark:border-slate-800/80 focus-visible:ring-2 focus-visible:ring-brand-500/20 focus-visible:border-brand-500 bg-slate-50/50 dark:bg-slate-900/30 shadow-sm transition-all duration-200"
+                  className="w-12 h-14 text-center font-bold text-xl rounded-2xl border-slate-300 dark:border-slate-600 focus-visible:ring-2 focus-visible:ring-[#0B57D0]/20 focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all shadow-xs"
                 />
               ))}
             </div>
 
-            <div className="space-y-3.5">
+            <div className="space-y-3">
               <Button
                 type="submit"
                 disabled={loading || otp.join("").length !== 5}
-                className="w-full h-11 rounded-xl bg-brand-500 hover:bg-brand-600 font-bold shadow-md active:scale-[0.98] transition-all cursor-pointer"
+                className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
               >
                 {loading ? (
                   <>
@@ -487,7 +406,7 @@ export default function AuthPage() {
                     Verifying...
                   </>
                 ) : (
-                  "Verify Code"
+                  "Verify"
                 )}
               </Button>
               
@@ -496,10 +415,10 @@ export default function AuthPage() {
                 variant="ghost"
                 disabled={loading}
                 onClick={() => setStep("phone")}
-                className="w-full h-11 rounded-xl hover:bg-slate-100/50 dark:hover:bg-slate-900/40 flex gap-2 justify-center items-center text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                className="w-full h-10 rounded-full hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] flex gap-2 justify-center items-center text-xs font-medium text-[#0B57D0] dark:text-[#A8C7FA] transition-colors cursor-pointer"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Back to Phone number
+                Try a different phone number
               </Button>
             </div>
           </form>
@@ -508,15 +427,17 @@ export default function AuthPage() {
         {/* STEP 3: 2FA Cloud password */}
         {step === "password" && (
           <form onSubmit={handleVerifyPassword} className="space-y-5 animate-slide-up-fade">
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">Two-Factor Authentication</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Your Telegram account requires a Cloud password. Enter it below to authorize this session.
+            <div className="text-center space-y-1">
+              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Two-Step Verification</h3>
+              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
+                Your Telegram account is protected by an additional cloud password.
               </p>
             </div>
 
             <div className="space-y-2 mt-4">
-              <Label htmlFor="cloud-password" className="text-xs font-bold text-slate-600 dark:text-slate-355 uppercase tracking-wider">Cloud password</Label>
+              <Label htmlFor="cloud-password" className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">
+                Password
+              </Label>
               <div className="relative">
                 <Input
                   id="cloud-password"
@@ -525,13 +446,13 @@ export default function AuthPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={loading}
-                  className="rounded-xl h-11 pr-10 border-slate-200 dark:border-slate-800 focus-visible:ring-brand-500 focus-visible:border-brand-500 bg-slate-50/50 dark:bg-slate-900/30 focus-visible:ring-2 transition-all duration-200"
+                  className="rounded-xl h-12 pr-10 border-slate-300 dark:border-slate-600 focus-visible:ring-[#0B57D0] focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all text-sm"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute right-1 top-1 h-9 w-9 hover:bg-transparent text-muted-foreground hover:text-foreground cursor-pointer"
+                  className="absolute right-1 top-1.5 h-9 w-9 hover:bg-transparent text-[#747775] hover:text-[#1F1F1F] dark:hover:text-[#E3E3E3] cursor-pointer"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -539,11 +460,11 @@ export default function AuthPage() {
               </div>
             </div>
 
-            <div className="space-y-3.5 pt-2">
+            <div className="space-y-3 pt-2">
               <Button
                 type="submit"
                 disabled={loading || !password}
-                className="w-full h-11 rounded-xl bg-brand-500 hover:bg-brand-600 font-bold shadow-md active:scale-[0.98] transition-all cursor-pointer"
+                className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
               >
                 {loading ? (
                   <>
@@ -560,10 +481,10 @@ export default function AuthPage() {
                 variant="ghost"
                 disabled={loading}
                 onClick={() => setStep("otp")}
-                className="w-full h-11 rounded-xl hover:bg-slate-100/50 dark:hover:bg-slate-900/40 flex gap-2 justify-center items-center text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-850 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                className="w-full h-10 rounded-full hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] flex gap-2 justify-center items-center text-xs font-medium text-[#0B57D0] dark:text-[#A8C7FA] transition-colors cursor-pointer"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Back to Code verification
+                Back to code verification
               </Button>
             </div>
           </form>
@@ -572,20 +493,20 @@ export default function AuthPage() {
         {/* STEP 4: Bootstrapping TeleDrive */}
         {step === "bootstrap" && (
           <div className="space-y-6 py-4 text-center animate-slide-up-fade">
-            <div className="space-y-2">
-              <h3 className="text-lg font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">
-                Setting up TeleDrive
+            <div className="space-y-1">
+              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">
+                Setting up your Drive
               </h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Please wait while we initialize your secure cloud storage space.
+              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
+                Initializing your personal Telegram cloud storage workspace.
               </p>
             </div>
 
             {bootstrapError ? (
               <div className="space-y-4">
-                <div className="flex gap-2.5 p-3.5 rounded-xl border border-red-200 bg-red-50/50 dark:border-red-950/40 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-xs text-left">
-                  <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed font-semibold">{bootstrapError}</span>
+                <div className="flex gap-2.5 p-3.5 rounded-2xl border border-rose-200 bg-rose-50/50 dark:border-rose-950/40 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs text-left">
+                  <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5 text-rose-500" />
+                  <span className="leading-relaxed font-medium">{bootstrapError}</span>
                 </div>
                 <Button
                   onClick={() => {
@@ -594,15 +515,15 @@ export default function AuthPage() {
                      setStep("phone");
                      setTimeout(() => setStep("bootstrap"), 50);
                   }}
-                  className="w-full h-11 rounded-xl bg-brand-500 hover:bg-brand-600 font-bold shadow-md cursor-pointer"
+                  className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm shadow-xs cursor-pointer"
                 >
                   Retry Setup
                 </Button>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center gap-5 py-6">
-                <Loader2 className="h-11 w-11 animate-spin text-brand-500 stroke-[2]" />
-                <span className="text-xs font-semibold text-slate-650 dark:text-slate-350 animate-pulse bg-slate-100 dark:bg-slate-800/80 px-4 py-1.5 rounded-full border dark:border-slate-800/50">
+                <Loader2 className="h-10 w-10 animate-spin text-[#0B57D0] dark:text-[#A8C7FA] stroke-[2]" />
+                <span className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5] bg-[#F0F4F9] dark:bg-[#282A2C] px-4 py-1.5 rounded-full border border-slate-200/60 dark:border-slate-700/60">
                   {bootstrapStatus}
                 </span>
               </div>

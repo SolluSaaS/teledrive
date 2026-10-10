@@ -1,5 +1,29 @@
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import { HardDrive, Clock, Star, Trash2, Settings, Menu, Database, Loader2, Archive, AlertTriangle, RefreshCw, Cloud, Shield } from "lucide-react";
+import {
+  HardDrive,
+  Clock,
+  Star,
+  Trash2,
+  Settings,
+  Menu,
+  Loader2,
+  Archive,
+  AlertTriangle,
+  RefreshCw,
+  Cloud,
+  Shield,
+  FolderPlus,
+  Upload,
+  Folder,
+  Sun,
+  Moon,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
@@ -29,6 +53,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getModKey } from "@/lib/os";
 
 const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
 
@@ -37,6 +62,7 @@ export default function DriveLayout() {
   const location = useLocation();
   const isMobile = useIsMobile();
   const phoneNumber = useAuthStore((state) => state.phoneNumber);
+  const modKey = useMemo(() => getModKey(), []);
   
   const {
     moveMultipleFilesOrFolders,
@@ -459,10 +485,84 @@ export default function DriveLayout() {
     return items;
   }, [archivedCount, starredCount, totalCount, trashCount, backupCount, isPro]);
 
+  const theme = useUIStore((state) => state.theme);
+  const setTheme = useUIStore((state) => state.setTheme);
+
+  // Iconic 4-color Google Drive plus icon with seamless geometry and rounded caps
+  const GooglePlusIcon = ({ className }: { className?: string }) => (
+    <svg className={cn("w-6 h-6 shrink-0", className)} viewBox="0 0 24 24" fill="none">
+      {/* Top arm (Red) */}
+      <path d="M12 4c-.83 0-1.5.67-1.5 1.5V11h3V5.5c0-.83-.67-1.5-1.5-1.5z" fill="#EA4335" />
+      {/* Right arm (Blue) */}
+      <path d="M18.5 10.5H13v3h5.5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z" fill="#4285F4" />
+      {/* Bottom arm (Green) */}
+      <path d="M12 20c.83 0 1.5-.67 1.5-1.5V13h-3v5.5c0 .83.67 1.5 1.5 1.5z" fill="#34A853" />
+      {/* Left arm (Yellow) */}
+      <path d="M5.5 10.5C4.67 10.5 4 11.17 4 12s.67 1.5 1.5 1.5H11v-3H5.5z" fill="#FBBC05" />
+      {/* Center junction */}
+      <rect x="10.5" y="10.5" width="3" height="3" fill="#4285F4" />
+    </svg>
+  );
+
+  // Google Drive "+ New" button & mobile FAB
+  const NewActionButton = ({ className, isFab = false }: { className?: string; isFab?: boolean }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="New item"
+          className={cn(
+            isFab
+              ? "fixed bottom-20 right-5 z-40 h-14 w-14 rounded-2xl bg-white dark:bg-[#282a2c] text-[#1f1f1f] dark:text-[#e3e3e3] border border-slate-200/80 dark:border-[#3c4043]/50 shadow-xl flex items-center justify-center cursor-pointer active:scale-95 transition-all"
+              : "inline-flex items-center gap-3.5 h-14 min-w-[124px] px-5 rounded-2xl bg-white dark:bg-[#282a2c] text-[#1f1f1f] dark:text-[#e3e3e3] border border-transparent dark:border-[#3c4043]/50 shadow-[0_1px_2px_0_rgba(60,64,67,0.3),0_1px_3px_1px_rgba(60,64,67,0.15)] hover:shadow-[0_1px_3px_0_rgba(60,64,67,0.3),0_4px_8px_3px_rgba(60,64,67,0.15)] dark:shadow-[0_1px_2px_0_rgba(0,0,0,0.5)] dark:hover:shadow-[0_2px_6px_2px_rgba(0,0,0,0.6)] hover:bg-[#f8fafd] dark:hover:bg-[#333537] transition-all duration-200 cursor-pointer select-none active:scale-[0.98]",
+            className
+          )}
+        >
+          <GooglePlusIcon />
+          {!isFab && <span className="text-sm font-semibold tracking-wide text-[#1f1f1f] dark:text-[#e3e3e3]">New</span>}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={isFab ? "end" : "start"}
+        side={isFab ? "top" : "bottom"}
+        sideOffset={8}
+        className="w-56 p-1.5 rounded-2xl bg-white dark:bg-[#282a2c] border border-slate-200/90 dark:border-slate-700/80 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_1px_4px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.6)] z-50 animate-in fade-in zoom-in-95"
+      >
+        <DropdownMenuItem
+          onClick={() => window.dispatchEvent(new CustomEvent("teledrive-trigger-create-folder"))}
+          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
+        >
+          <FolderPlus className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
+          <span>New folder</span>
+        </DropdownMenuItem>
+        <div className="h-px bg-slate-200/70 dark:bg-slate-700/60 my-1.5" />
+        <DropdownMenuItem
+          onClick={() => triggerFilePicker()}
+          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
+        >
+          <Upload className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
+          <span>File upload</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => triggerFolderPicker()}
+          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
+        >
+          <Folder className="h-4.5 w-4.5 text-[#444746] dark:text-[#c4c7c5]" />
+          <span>Folder upload</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-slate-50/20 dark:bg-slate-900/5 select-none">
-      {/* Navigation items */}
-      <nav className="flex-1 px-3 py-4 space-y-1.5">
+    <div className="flex flex-col h-full bg-background select-none">
+      {/* Google Drive "+ New" button */}
+      <div className="px-4 pt-3 pb-3">
+        <NewActionButton />
+      </div>
+
+      {/* Navigation items: Google Drive full-rounded pills */}
+      <nav className="flex-1 px-3 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -490,53 +590,40 @@ export default function DriveLayout() {
               }}
               data-drop-target={item.dropTarget ?? undefined}
               className={cn(
-                "flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative group cursor-pointer border",
+                "flex items-center gap-3.5 px-4 h-10 rounded-full text-sm font-medium transition-colors select-none cursor-pointer",
                 isActive
-                  ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-400 shadow-xs"
+                  ? "bg-[#c2e7ff] text-[#001d35] font-semibold dark:bg-[#004a77] dark:text-[#c2e7ff]"
                   : sidebarDragOverPath === item.path
-                  ? "bg-brand-500/10 border-brand-500/35 dark:border-brand-500/25 text-brand-600 dark:text-brand-400 scale-[1.02] shadow-sm"
-                  : "text-muted-foreground hover:bg-slate-100/60 dark:hover:bg-slate-900/30 hover:text-foreground border-transparent hover:translate-x-0.5"
+                  ? "bg-[#c2e7ff]/70 text-[#001d35] dark:bg-[#004a77]/70 dark:text-[#c2e7ff]"
+                  : "text-[#444746] dark:text-[#c4c7c5] hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] hover:text-[#1f1f1f] dark:hover:text-[#e3e3e3]"
               )}
             >
-              {isActive && (
-                <div className="absolute left-0 top-2.5 bottom-2.5 w-1 bg-brand-500 rounded-r-full shadow-[0_0_8px_rgba(26,115,232,0.6)]" />
-              )}
-              <Icon className={`h-4.5 w-4.5 shrink-0 transition-transform duration-200 ${isActive ? "text-brand-500 scale-105" : "text-muted-foreground group-hover:text-foreground"}`} />
-              <span className="flex-1">{item.label}</span>
-              {(item as any).badge > 0 && (
-                <span className={`ml-auto text-[10px] font-extrabold rounded-full px-2 py-0.5 min-w-[20px] text-center transition-colors border ${
-                  isActive
-                    ? "bg-brand-500/10 text-brand-600 border-brand-500/20 dark:bg-brand-500/20 dark:text-brand-400 dark:border-brand-500/30"
-                    : "bg-slate-100 dark:bg-slate-800 text-muted-foreground border-slate-200/50 dark:border-slate-800/50"
-                }`}>
-                  {(item as any).badge}
-                </span>
-              )}
+              <Icon className={cn("h-4.5 w-4.5 shrink-0", isActive ? "text-[#001d35] dark:text-[#c2e7ff]" : "text-[#444746] dark:text-[#c4c7c5]")} />
+              <span className="flex-1 truncate">{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Storage panel wrapped in a beautiful card matching the settings design */}
-      <div className="mx-3.5 mb-4 p-4 border border-slate-200/60 dark:border-slate-800/80 rounded-2xl bg-white/70 dark:bg-slate-900/30 shadow-xs space-y-3.5 select-none relative overflow-hidden backdrop-blur-md">
-        <div className="flex items-center gap-2 text-xs font-extrabold text-slate-550 dark:text-slate-400 uppercase tracking-wider">
-          <Database className="h-4 w-4 text-brand-500" />
+      {/* Storage panel: Google Drive Cloud Storage meter */}
+      <div className="px-4 pb-4 pt-3 space-y-2.5 select-none border-t border-slate-200/50 dark:border-slate-800/40">
+        <div className="flex items-center gap-2 text-xs font-semibold text-[#444746] dark:text-[#c4c7c5]">
+          <Cloud className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
           <span>Storage</span>
         </div>
         
-        <div className="space-y-2">
-          <div className="text-sm font-extrabold text-slate-850 dark:text-slate-200 flex items-baseline gap-1">
-            <span>{formattedUsedSize}</span>
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">used</span>
-          </div>
-          
-          <div className="text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-500/10 border border-green-500/20 dark:border-green-400/25 rounded-full px-2.5 py-0.5 inline-flex items-center gap-1.5 select-none mt-1">
-            <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
-            </span>
-            <span>Unlimited Storage</span>
-          </div>
+        {/* Google style linear progress bar */}
+        <div className="w-full h-1 bg-[#e0e2ec] dark:bg-[#36373a] rounded-full overflow-hidden">
+          <div className="h-full bg-[#0b57d0] dark:bg-[#a8c7fa] rounded-full w-2" />
+        </div>
+
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs text-[#444746] dark:text-[#c4c7c5]">
+            <strong className="font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{formattedUsedSize}</strong> of Unlimited used
+          </span>
+          <span className="text-[11px] text-[#0b57d0] dark:text-[#a8c7fa] font-medium">
+            Telegram Cloud Storage
+          </span>
         </div>
       </div>
     </div>
@@ -550,43 +637,38 @@ export default function DriveLayout() {
       onDrop={handleDrop}
       className="flex flex-col h-screen overflow-hidden bg-background text-foreground relative"
     >
-      {/* Decorative ambient background blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/5 dark:bg-brand-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[8000ms]" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/5 dark:bg-indigo-500/8 blur-[130px] pointer-events-none z-0 animate-pulse duration-[12000ms]" />
-      {/* Drag & Drop full screen overlay */}
+      {/* Drag & Drop full screen overlay: Google Drive styled */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/75 dark:bg-slate-950/80 backdrop-blur-lg border-4 border-dashed border-brand-500/80 m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-300 select-none pointer-events-none">
-          <div className="flex flex-col items-center gap-4 text-brand-600 dark:text-brand-400">
-            <div className="p-6 rounded-full bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 animate-bounce">
-              <svg className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#edf2fc]/90 dark:bg-[#1e1f20]/90 backdrop-blur-sm border-2 border-dashed border-[#0b57d0] m-4 rounded-3xl animate-in fade-in zoom-in-95 duration-200 select-none pointer-events-none">
+          <div className="flex flex-col items-center gap-4 text-[#0b57d0] dark:text-[#a8c7fa]">
+            <div className="p-5 rounded-full bg-white dark:bg-[#282a2c] shadow-lg border border-slate-200/80 dark:border-slate-700 transition-transform duration-300 scale-105">
+              <Upload className="h-10 w-10 text-[#0b57d0] dark:text-[#a8c7fa]" />
             </div>
-            <h2 className="text-2xl font-extrabold tracking-tight">Drop files to upload</h2>
-            <p className="text-sm font-semibold text-muted-foreground">Upload directly to the current directory in TeleDrive</p>
+            <h2 className="text-2xl font-bold tracking-tight text-[#1f1f1f] dark:text-[#e3e3e3]">Drop files to upload to My Drive</h2>
+            <p className="text-sm font-medium text-[#444746] dark:text-[#c4c7c5]">Release to begin uploading immediately</p>
           </div>
         </div>
       )}
       
-      {/* Topbar */}
-      <header className="relative z-40 flex items-center justify-between border-b px-4 h-14 md:h-16 shrink-0 bg-background/80 backdrop-blur-md border-slate-200/60 dark:border-slate-800/60">
-        <div className="flex items-center gap-2 md:gap-4 shrink-0">
+      {/* Topbar: Google Workspace styled */}
+      <header className="relative z-40 flex items-center justify-between px-4 h-16 shrink-0 bg-background border-b md:border-b-0 border-slate-200/60 dark:border-slate-800/60 select-none">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           {isMobile && (
             <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-muted cursor-pointer">
+                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] text-[#444746] dark:text-[#c4c7c5] cursor-pointer">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[var(--sidebar-width)] p-0 pt-10">
-                <div className="px-6 py-2 flex items-center gap-2">
+              <SheetContent side="left" className="w-[var(--sidebar-width)] p-0 pt-6 bg-background">
+                <div className="px-5 py-2 flex items-center gap-2.5 mb-2">
                   <img
                     src="/teledrive.png"
                     alt="TeleDrive Logo"
-                    className="h-6 w-6 object-contain rounded-lg shadow-sm"
+                    className="h-7 w-7 object-contain rounded-lg shadow-sm"
                   />
-                  <span className="text-xl font-bold text-slate-800 dark:text-slate-200 tracking-tight">
-                    {isPro ? "TeleDrive Pro" : "TeleDrive"}
+                  <span className="text-xl font-bold tracking-tight text-[#1f1f1f] dark:text-[#e3e3e3]">
+                    TeleDrive
                   </span>
                 </div>
                 <SidebarContent />
@@ -596,16 +678,13 @@ export default function DriveLayout() {
 
           {/* Logo / Title */}
           <Link to="/drive/my-drive" className="flex items-center gap-2.5 group">
-            <div className="relative">
-              <div className="absolute inset-0 bg-brand-500/25 blur-xs rounded-lg group-hover:bg-brand-500/35 transition-all duration-300" />
-              <img
-                src="/teledrive.png"
-                alt="TeleDrive Logo"
-                className="relative h-7 w-7 object-contain rounded-lg shadow-sm shrink-0 transition-transform duration-300 group-hover:scale-105"
-              />
-            </div>
-            <span className="hidden sm:inline-block text-lg font-extrabold tracking-tight text-slate-800 dark:text-slate-200">
-              {isPro ? "TeleDrive Pro" : "TeleDrive"}
+            <img
+              src="/teledrive.png"
+              alt="TeleDrive Logo"
+              className="h-8 w-8 object-contain rounded-lg shadow-xs shrink-0 transition-transform duration-200 group-hover:scale-105"
+            />
+            <span className="hidden sm:inline-block text-xl font-semibold tracking-tight text-[#1f1f1f] dark:text-[#e3e3e3]">
+              TeleDrive
             </span>
           </Link>
         </div>
@@ -616,15 +695,8 @@ export default function DriveLayout() {
         </div>
 
         {/* Right side items */}
-        <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
-          {/* Index queue state pill.
-              Visible states:
-              - failed: amber/red pill with a "Retry" button (uses window.__teledriveRetryIndex)
-              - retrying: spinner + "Retrying in Xs"
-              - saving (or isSyncing): spinner + "Syncing" (legacy behavior preserved)
-              - syncing-remote: subtle spinner + "Synced from other device" (Pro live sync)
-              - backup-running: subtle spinner + "Backup in progress"
-              Hidden when idle and no optimistic op is in flight. */}
+        <div className="flex items-center gap-1.5 md:gap-2.5 shrink-0">
+          {/* Index queue state pill */}
           {(indexQueueState === "failed" ||
             indexQueueState === "retrying" ||
             (isSyncing && indexQueueState === "saving") ||
@@ -643,12 +715,12 @@ export default function DriveLayout() {
                   : undefined
               }
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border",
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border text-xs",
                 indexQueueState === "failed"
-                  ? "bg-amber-50/90 dark:bg-amber-950/40 border-amber-300/60 dark:border-amber-700/50 text-amber-700 dark:text-amber-300"
+                  ? "bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700/50 text-amber-800 dark:text-amber-200"
                   : indexQueueState === "syncing-remote" || indexQueueState === "backup-running"
-                  ? "bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300/60 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300"
-                  : "bg-slate-100/80 dark:bg-slate-900/60 border-slate-200/50 dark:border-slate-800/50 text-slate-500 dark:text-slate-400"
+                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-200"
+                  : "bg-[#edf2fc] dark:bg-[#282a2c] border-transparent text-[#444746] dark:text-[#c4c7c5]"
               )}
             >
               {indexQueueState === "failed" ? (
@@ -658,15 +730,15 @@ export default function DriveLayout() {
               ) : indexQueueState === "backup-running" ? (
                 <Shield className="h-3.5 w-3.5 shrink-0" />
               ) : (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500 shrink-0" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0b57d0] shrink-0" />
               )}
-              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wide">
+              <span className="text-[11px] font-semibold">
                 {indexQueueState === "failed"
                   ? "Save failed"
                   : indexQueueState === "retrying" && indexQueueRetryInSec > 0
                   ? `Retrying in ${indexQueueRetryInSec}s`
                   : indexQueueState === "syncing-remote"
-                  ? "Synced from other device"
+                  ? "Synced"
                   : indexQueueState === "backup-running"
                   ? "Backup in progress"
                   : "Syncing"}
@@ -678,7 +750,6 @@ export default function DriveLayout() {
                     const fn = (window as any).__teledriveRetryIndex;
                     const phone = useAuthStore.getState().phoneNumber;
                     if (typeof fn === "function" && phone) {
-                      // Look up the active channel id via the global hook.
                       import("@/lib/secure/vault").then(({ getSecret, channelIdKey, VAULT_KEY_CHANNEL_ID }) =>
                         getSecret(channelIdKey(phone))
                           .then((cid) => cid || getSecret(VAULT_KEY_CHANNEL_ID))
@@ -687,7 +758,7 @@ export default function DriveLayout() {
                       );
                     }
                   }}
-                  className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 hover:bg-amber-300/70 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-100 text-[10px] font-semibold uppercase tracking-wide transition-colors cursor-pointer"
+                  className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 text-[10px] font-semibold uppercase tracking-wide cursor-pointer"
                 >
                   <RefreshCw className="h-3 w-3" />
                   Retry
@@ -696,18 +767,31 @@ export default function DriveLayout() {
             </div>
           )}
 
+          {/* Quick theme toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="h-10 w-10 rounded-full hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] text-[#444746] dark:text-[#c4c7c5] cursor-pointer"
+            title={theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
+          >
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
+
+          {/* Settings button */}
           <Button
             variant="ghost"
             size="icon"
             onClick={() => navigate("/settings")}
-            className="h-10 w-10 rounded-full hover:bg-muted hidden md:flex cursor-pointer"
+            className="h-10 w-10 rounded-full hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] text-[#444746] dark:text-[#c4c7c5] hidden md:flex cursor-pointer"
             title="Settings"
           >
-            <Settings className="h-5 w-5 text-slate-550 dark:text-slate-400" />
+            <Settings className="h-5 w-5" />
           </Button>
 
-          <Avatar className="h-9 w-9 border cursor-pointer hover:opacity-90 transition-opacity" onClick={() => navigate("/settings")}>
-            <AvatarFallback className="bg-gradient-to-tr from-brand-500 to-indigo-500 text-white font-bold text-xs select-none">
+          {/* Avatar */}
+          <Avatar className="h-9 w-9 border border-slate-200 dark:border-slate-800 cursor-pointer hover:opacity-90 transition-opacity" onClick={() => navigate("/settings")}>
+            <AvatarFallback className="bg-gradient-to-tr from-[#0b57d0] to-[#1a73e8] text-white font-semibold text-xs select-none">
               {getInitials(phoneNumber)}
             </AvatarFallback>
           </Avatar>
@@ -724,22 +808,24 @@ export default function DriveLayout() {
         </div>
       )}
 
-      {/* Main shell */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Main shell: Google Drive Canvas + Surface sheet */}
+      <div className="flex flex-1 overflow-hidden bg-background">
         {/* Sidebar (Desktop) */}
         {!isMobile && (
-          <aside className="w-[var(--sidebar-width)] border-r border-slate-200/60 dark:border-slate-800/50 bg-slate-50/10 dark:bg-slate-950/10 backdrop-blur-md shrink-0 z-10">
+          <aside className="w-[var(--sidebar-width)] bg-background shrink-0 z-10 flex flex-col">
             <SidebarContent />
           </aside>
         )}
 
-        {/* Main Content Area */}
+        {/* Main Content Area: Google Drive Rounded Surface Sheet Container */}
         <main
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          className="flex-1 overflow-y-auto bg-slate-50/30 dark:bg-slate-950/20 pb-[calc(var(--mobile-nav-height)+16px)] md:pb-6 relative z-10"
+          className="flex-1 overflow-y-auto bg-surface dark:bg-[#1e1f20] md:mr-4 md:mb-4 md:rounded-3xl border border-slate-200/80 dark:border-[#2d2f31] shadow-xs pb-[calc(var(--mobile-nav-height)+16px)] md:pb-6 relative z-10"
         >
+          {/* Mobile FAB */}
+          {isMobile && <NewActionButton isFab />}
           {/* Pull to refresh spinner */}
           {(pullProgress > 0 || isRefreshing) && (
             <div
@@ -763,7 +849,7 @@ export default function DriveLayout() {
 
       {/* Bottom Nav (Mobile) */}
       {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 h-[var(--mobile-nav-height)] border-t bg-background flex items-center justify-around z-40 pb-[env(safe-area-inset-bottom)]">
+        <nav className="fixed bottom-0 left-0 right-0 h-[var(--mobile-nav-height)] border-t border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-[#1e1f20]/95 backdrop-blur-md flex items-center justify-around z-40 pb-[env(safe-area-inset-bottom)] select-none">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
@@ -774,12 +860,20 @@ export default function DriveLayout() {
               <Link
                 key={item.label}
                 to={item.path}
-                className={`flex flex-col items-center justify-center w-16 h-full transition-colors ${
-                  isActive ? "text-brand-500 font-semibold" : "text-muted-foreground"
-                }`}
+                className={cn(
+                  "flex flex-col items-center justify-center w-16 h-full transition-colors cursor-pointer",
+                  isActive
+                    ? "text-[#0b57d0] dark:text-[#a8c7fa] font-semibold"
+                    : "text-[#444746] dark:text-[#c4c7c5]"
+                )}
               >
-                <Icon className="h-5 w-5 mb-0.5" />
-                <span className="text-[10px]">{item.label}</span>
+                <div className={cn(
+                  "px-3.5 py-0.5 rounded-full mb-0.5 transition-colors",
+                  isActive && "bg-[#c2e7ff] dark:bg-[#004a77]"
+                )}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <span className="text-[10px] tracking-tight">{item.label}</span>
               </Link>
             );
           })}
@@ -787,12 +881,20 @@ export default function DriveLayout() {
           {/* Settings tab for mobile bottom nav */}
           <Link
             to="/settings"
-            className={`flex flex-col items-center justify-center w-16 h-full transition-colors ${
-              location.pathname === "/settings" ? "text-brand-500 font-semibold" : "text-muted-foreground"
-            }`}
+            className={cn(
+              "flex flex-col items-center justify-center w-16 h-full transition-colors cursor-pointer",
+              location.pathname === "/settings"
+                ? "text-[#0b57d0] dark:text-[#a8c7fa] font-semibold"
+                : "text-[#444746] dark:text-[#c4c7c5]"
+            )}
           >
-            <Settings className="h-5 w-5 mb-0.5" />
-            <span className="text-[10px]">Settings</span>
+            <div className={cn(
+              "px-3.5 py-0.5 rounded-full mb-0.5 transition-colors",
+              location.pathname === "/settings" && "bg-[#c2e7ff] dark:bg-[#004a77]"
+            )}>
+              <Settings className="h-5 w-5" />
+            </div>
+            <span className="text-[10px] tracking-tight">Settings</span>
           </Link>
         </nav>
       )}
@@ -810,80 +912,6 @@ export default function DriveLayout() {
       <UploadProgressPanel />
       <BackupProgressOverlay />
 
-      {/* Mobile Floating Action Button (FAB) */}
-      {isMobile && (location.pathname === "/drive/my-drive" || location.pathname.startsWith("/drive/folder/")) && (
-        <Sheet open={mobileActionsOpen} onOpenChange={(open) => {
-          setMobileActionsOpen(open);
-          if (open) {
-            window.history.pushState({ modal: "actions" }, "");
-          } else if (window.history.state?.modal === "actions") {
-            window.history.back();
-          }
-        }}>
-          <SheetTrigger asChild>
-            <Button
-              className="fixed bottom-20 right-6 h-14 w-14 rounded-full bg-brand-500 hover:bg-brand-600 text-white shadow-xl z-40 flex items-center justify-center transition-transform active:scale-95 border-0 cursor-pointer"
-              size="icon"
-            >
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="bottom" className="rounded-t-2xl px-6 py-5 max-h-[300px] bg-white dark:bg-slate-900 border-t dark:border-slate-800">
-            <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wider select-none">Create New</h3>
-            <div className="grid grid-cols-3 gap-3 pb-6 select-none">
-              <button
-                onClick={() => {
-                  setMobileActionsOpen(false);
-                  if (window.history.state?.modal === "actions") window.history.back();
-                  const event = new CustomEvent("teledrive-trigger-create-folder");
-                  window.dispatchEvent(event);
-                }}
-                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
-              >
-                <div className="h-9 w-9 rounded-full bg-brand-50 dark:bg-brand-950/40 text-brand-500 flex items-center justify-center mb-1.5">
-                  <HardDrive className="h-4.5 w-4.5" />
-                </div>
-                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Folder</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setMobileActionsOpen(false);
-                  if (window.history.state?.modal === "actions") window.history.back();
-                  triggerFilePicker();
-                }}
-                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
-              >
-                <div className="h-9 w-9 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center mb-1.5">
-                  <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                  </svg>
-                </div>
-                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Files</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setMobileActionsOpen(false);
-                  if (window.history.state?.modal === "actions") window.history.back();
-                  triggerFolderPicker();
-                }}
-                className="flex flex-col items-center justify-center p-3 border rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 transition-colors bg-transparent cursor-pointer"
-              >
-                <div className="h-9 w-9 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-500 flex items-center justify-center mb-1.5">
-                  <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.5v6m3-3H9m4.062-9.748l2 2A1.5 1.5 0 0115.62 9H19.5A1.5 1.5 0 0121 10.5v9a1.5 1.5 0 01-1.5 1.5H4.5A1.5 1.5 0 013 19.5v-12A1.5 1.5 0 014.5 6h4.88a1.5 1.5 0 011.06.44l2.622 2.622H19.5" />
-                  </svg>
-                </div>
-                <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200 text-center">Folder</span>
-              </button>
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
-
       {/* Keyboard Shortcuts Dialog */}
       <Dialog open={shortcutsOpen} onOpenChange={(open) => {
         setShortcutsOpen(open);
@@ -891,57 +919,57 @@ export default function DriveLayout() {
           window.history.back();
         }
       }}>
-        <DialogContent className="rounded-2xl max-w-lg p-6 bg-white dark:bg-slate-900 border dark:border-slate-800">
+        <DialogContent className="rounded-3xl max-w-lg p-6 bg-white dark:bg-[#1e1f20] border border-slate-200/80 dark:border-slate-800 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-slate-800 dark:text-slate-200">
+            <DialogTitle className="text-lg font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">
               Keyboard Shortcuts
             </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 select-none">
             <div>
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Navigation & Search</h4>
+              <h4 className="text-xs font-semibold text-[#444746] dark:text-[#c4c7c5] tracking-wide mb-3">Navigation & Search</h4>
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Focus Search</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">/ or ⌘F</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Focus Search</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">/ or {modKey}F</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Clear selection / blur</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">Esc</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Clear selection / blur</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">Esc</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Scroll to top</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">g g</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Scroll to top</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">g g</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Scroll to bottom</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">g l</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Scroll to bottom</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">g l</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Show shortcuts help</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">?</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Show shortcuts help</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">?</kbd>
                 </div>
               </div>
             </div>
 
             <div>
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Actions on Selection</h4>
+              <h4 className="text-xs font-semibold text-[#444746] dark:text-[#c4c7c5] tracking-wide mb-3">Actions on Selection</h4>
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Select all items</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">⌘A</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Select all items</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{modKey}A</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Move to Trash</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">Del / Backspace</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Move to Trash</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">Del / Backspace</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Rename item</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">F2</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Rename item</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">F2</kbd>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Download file</span>
-                  <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 rounded text-[10px] font-semibold text-slate-700 dark:text-slate-300">⌘D</kbd>
+                  <span className="text-[#444746] dark:text-[#c4c7c5]">Download file</span>
+                  <kbd className="px-2 py-0.5 bg-[#f0f4f9] dark:bg-[#282a2c] border border-slate-300/70 dark:border-slate-700 rounded-md text-[10px] font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{modKey}D</kbd>
                 </div>
               </div>
             </div>

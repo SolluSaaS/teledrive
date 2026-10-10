@@ -51,12 +51,16 @@ interface Props {
   code: string;
   fileName: string;
   className?: string;
+  wrapLines?: boolean;
+  fontSize?: number;
 }
 
 export const SyntaxHighlighter = memo(function SyntaxHighlighter({
   code,
   fileName,
   className = "",
+  wrapLines = false,
+  fontSize = 13,
 }: Props) {
   const isDark = useDarkMode();
   const [highlighted, setHighlighted] = useState<string>("");
@@ -65,6 +69,7 @@ export const SyntaxHighlighter = memo(function SyntaxHighlighter({
 
   const lineCount = useMemo(() => code.split(/\r?\n/).length, [code]);
   const isTooLarge = lineCount > MAX_HIGHLIGHT_LINES;
+  const lineHeightPx = Math.round(fontSize * 1.62);
 
   // ── Inject theme CSS dynamically based on active theme ───────────────────
   useEffect(() => {
@@ -148,8 +153,8 @@ export const SyntaxHighlighter = memo(function SyntaxHighlighter({
         gridTemplateColumns: "min-content 1fr",
         background: bg,
         fontFamily: "'Geist Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace",
-        fontSize: "13px",
-        lineHeight: "21px",
+        fontSize: `${fontSize}px`,
+        lineHeight: `${lineHeightPx}px`,
         scrollbarWidth: "thin",
         scrollbarColor: isDark ? "#334155 transparent" : "#cbd5e1 transparent",
       }}
@@ -171,8 +176,8 @@ export const SyntaxHighlighter = memo(function SyntaxHighlighter({
           color: gutterText,
           borderRight: `1px solid ${gutterBdr}`,
           whiteSpace: "pre",
-          lineHeight: "21px",
-          fontSize: "12px",
+          lineHeight: `${lineHeightPx}px`,
+          fontSize: `${Math.max(fontSize - 1, 11)}px`,
           fontFamily: "inherit",
           userSelect: "none",
           pointerEvents: "none",
@@ -189,8 +194,9 @@ export const SyntaxHighlighter = memo(function SyntaxHighlighter({
           padding: "1rem 1.5rem 1rem 0.75rem",
           background: "transparent",
           color: codeColor,
-          whiteSpace: "pre",
-          lineHeight: "21px",
+          whiteSpace: wrapLines ? "pre-wrap" : "pre",
+          wordBreak: wrapLines ? "break-word" : "normal",
+          lineHeight: `${lineHeightPx}px`,
           fontFamily: "inherit",
           fontSize: "inherit",
           transition: "color 0.2s",

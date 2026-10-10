@@ -31,4 +31,5 @@ dist-ssr
 .claude/
 vault_state.log
 buildfiles/
+*.dmg
 

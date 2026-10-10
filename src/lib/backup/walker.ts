@@ -39,7 +39,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { BackupSourceFolders } from "./sourceFolders";
-import { directoryShouldBeExcluded, normalizeRelativePath } from "./sourceFolders";
+import { directoryShouldBeExcluded, normalizeRelativePath, pathMatchesExclude } from "./sourceFolders";
+import { isJunkFile } from "../storage/fileSanitizer";
 
 /** A single file produced by the walker. JS-side camelCase; downstream
  *  (manifest, runner) keys everything off `absPath` and `mtimeMs`. */
@@ -139,11 +140,14 @@ async function walkOneFolder(
       continue;
     }
 
-    // Regular file. Skip excludes that match this file's relative path.
-    if (excludes.length > 0) {
-      // Lazy import to avoid a cycle (sourceFolders is the import target)
-      const { pathMatchesExclude } = await import("./sourceFolders");
-      if (pathMatchesExclude(entryRel, excludes).matches) continue;
+    // Regular file. Skip excludes that match this file's relative path or system defaults.
+    if (pathMatchesExclude(entryRel, excludes).matches) {
+      continue;
+    }
+
+    const fileName = entryRel.split("/").pop() || "";
+    if (isJunkFile({ name: fileName, folderPath: entryRel, size: entry.size })) {
+      continue;
     }
 
     // Rust struct is snake_case; convert to camelCase so downstream

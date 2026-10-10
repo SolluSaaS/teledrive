@@ -1,7 +1,7 @@
 {
   "name": "teledrive",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -41,6 +41,7 @@
     "@types/marked": "^5.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dompurify": "^3.4.16",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.21.0",
     "marked": "^18.0.5",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^26.0.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

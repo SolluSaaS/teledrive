@@ -74,6 +74,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { enqueueSave } from "../storage/indexQueue";
 import { getClient } from "../telegram/client";
 import { logEvent } from "../events";
+import { isJunkFile } from "../storage/fileSanitizer";
 
 /**
  * Wait until `bootstrapComplete=true` on the file store, capped at `timeoutMs`.
@@ -83,13 +84,15 @@ import { logEvent } from "../events";
  * a partial state (only the new file) to Telegram, silently overwriting the
  * previous full index — the bug that wiped the user's files on logout/relogin.
  */
-async function waitForBootstrap(timeoutMs: number = 8000): Promise<boolean> {
+async function waitForBootstrap(timeoutMs: number = 2000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (useFileStore.getState().bootstrapComplete) return true;
+    if (useFileStore.getState().bootstrapComplete || useFileStore.getState().files.length > 0) {
+      return true;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
-  return useFileStore.getState().bootstrapComplete;
+  return useFileStore.getState().bootstrapComplete || useFileStore.getState().files.length > 0;
 }
 
 let isProcessing = false;
@@ -227,43 +230,27 @@ export async function processQueue(): Promise<void> {
           };
 
           // --- Phase 2: Save metadata index to Telegram via the shared IndexQueue ---
-          // The optimistic files array already includes newFile (set just below).
-          // Routing through the queue means:
-          //   - 10 concurrent uploads finishing at the same instant coalesce
-          //     into one Telegram edit (latest-write-wins).
-          //   - A user rename in flight at the same time gets merged into the
-          //     same index commit.
-          //   - FLOOD_WAIT backoff is handled identically to user actions,
-          //     so no separate retry loop is needed here.
-          //
-          // Bootstrap gate: wait up to 8s for bootstrap to finish. If it
-          // doesn't (network blip during recovery), bail out of the index
-          // save rather than writing a partial state that wipes the previous
-          // full index. The file itself is already on Telegram — only the
-          // metadata index write is skipped, and the next orphan scan will
-          // pick it up.
-          const bootstrapReady = await waitForBootstrap(8000);
-          if (!bootstrapReady) {
-            await invoke("log_vault_state", {
-              state: `UPLOAD_INDEX_SKIPPED_PRE_BOOTSTRAP name=${item.name} mid=${newFile.messageId}`,
-            }).catch(() => {});
-            updateQueueItem(item.id, {
-              status: "error",
-              error: "Recovery still in progress — refresh to retry",
-            });
-            toast.warning(
-              `"${item.name}" uploaded, but the file list is still recovering. Refresh in a moment to see it.`,
-              { duration: 6000 }
-            );
-            return;
+          // Ensure we don't clobber state if bootstrap is starting up cold with 0 files
+          if (!useFileStore.getState().bootstrapComplete && useFileStore.getState().files.length === 0) {
+            await waitForBootstrap(2000);
           }
 
-          const existingFiles = useFileStore.getState().files;
+          let existingFiles = useFileStore.getState().files;
+          if (existingFiles.length === 0) {
+            try {
+              const { loadIndex } = await import("../storage/metadataStore");
+              existingFiles = await loadIndex(channelId);
+            } catch (err) {
+              console.warn("[uploadManager] Direct loadIndex fallback error:", err);
+            }
+          }
+
           const optimisticFiles = [
             ...existingFiles.filter((f) => f.id !== newFile.id),
             newFile,
           ];
           setFiles(optimisticFiles);
+          useFileStore.getState().setBootstrapComplete(true);
 
           updateQueueItem(item.id, { status: "done", progress: 100 });
           toast.success(`"${item.name}" uploaded successfully!`);
@@ -345,6 +332,10 @@ export function addFilesToUploadQueue(
   let addedCount = 0;
 
   files.forEach((file) => {
+    if (isJunkFile({ name: file.name, size: file.size, folderPath: currentFolder })) {
+      return;
+    }
+
     if (file.size === 0) {
       toast.error(`"${file.name}" is empty. Empty files (0 bytes) are not supported by Telegram.`, {
         duration: 4000,
