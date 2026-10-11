@@ -1,32 +1,250 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { AlertTriangle, Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, Loader2, ArrowLeft, MessageSquare, Lock } from "lucide-react";
 import { Api } from "telegram";
-import { computeCheck } from "telegram/Password";
 import { useAuthStore } from "@/stores/authStore";
 import { initClient, getClient } from "@/lib/telegram/client";
 import { saveSecret, getSecret, VAULT_KEY_SESSION, VAULT_KEY_PHONE, VAULT_KEY_API_ID, VAULT_KEY_API_HASH } from "@/lib/secure/vault";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
 import { DEFAULT_API_ID, DEFAULT_API_HASH } from "@/lib/telegram/config";
+import { safeComputeCheck } from "@/lib/telegram/srp-helper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
-import { Buffer } from "buffer";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Step = "phone" | "otp" | "password" | "bootstrap";
+
+// ─── Animated step indicator ──────────────────────────────────────────────────
+function StepDots({ current }: { current: Step }) {
+  const visibleSteps: Step[] = ["phone", "otp", "password"];
+  const currentIndex = visibleSteps.indexOf(current as any);
+  if (currentIndex === -1) return null;
+  return (
+    <div className="flex items-center justify-center gap-2 mb-7">
+      {visibleSteps.map((s, i) => (
+        <div
+          key={s}
+          className="transition-all duration-500 ease-out rounded-full"
+          style={{
+            width: i === currentIndex ? "24px" : "6px",
+            height: "6px",
+            background:
+              i < currentIndex
+                ? "var(--color-brand-500)"
+                : i === currentIndex
+                ? "var(--color-brand-500)"
+                : "#dadce0",
+            opacity: i > currentIndex ? 0.4 : 1,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Floating label input ─────────────────────────────────────────────────────
+interface FloatingInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  id: string;
+  suffix?: React.ReactNode;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+}
+
+function FloatingInput({ label, id, suffix, inputRef, className, ...props }: FloatingInputProps) {
+  const [focused, setFocused] = useState(false);
+  const hasValue = Boolean(props.value);
+  const lifted = focused || hasValue;
+
+  return (
+    <div className="relative group">
+      <label
+        htmlFor={id}
+        className="absolute left-4 transition-all duration-200 ease-out pointer-events-none z-10 select-none"
+        style={{
+          top: lifted ? "7px" : "50%",
+          transform: lifted ? "none" : "translateY(-50%)",
+          fontSize: lifted ? "10px" : "14px",
+          color: focused
+            ? "var(--color-brand-500)"
+            : lifted
+            ? "#747775"
+            : "#9aa0a6",
+          fontWeight: lifted ? 500 : 400,
+          letterSpacing: lifted ? "0.025em" : "normal",
+        }}
+      >
+        {label}
+      </label>
+      <Input
+        ref={inputRef as any}
+        id={id}
+        {...props}
+        onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
+        onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
+        className={`
+          h-14 pt-5 pb-1 px-4 rounded-2xl text-sm
+          border-2 transition-all duration-200 outline-none
+          bg-white dark:bg-[#282A2C]
+          text-[#1f1f1f] dark:text-[#E3E3E3]
+          ${focused
+            ? "border-[#0B57D0] dark:border-[#A8C7FA] shadow-[0_0_0_3px_rgba(11,87,208,0.12)]"
+            : "border-[#e0e3e7] dark:border-[#3c4043] hover:border-[#bdc1c6] dark:hover:border-[#5f6368]"}
+          ${props.disabled ? "opacity-60 cursor-not-allowed" : "cursor-text"}
+          focus-visible:ring-0 focus-visible:border-[#0B57D0] dark:focus-visible:border-[#A8C7FA]
+          ${suffix ? "pr-12" : "pr-4"}
+          ${className ?? ""}
+        `}
+      />
+      {suffix && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">{suffix}</div>
+      )}
+    </div>
+  );
+}
+
+// ─── OTP digit box ────────────────────────────────────────────────────────────
+interface OtpBoxProps {
+  value: string;
+  onChange: (val: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onPaste: (e: React.ClipboardEvent<HTMLInputElement>) => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  disabled: boolean;
+  index: number;
+  isFilled: boolean;
+}
+
+function OtpBox({ value, onChange, onKeyDown, onPaste, inputRef, disabled, index, isFilled }: OtpBoxProps) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <div
+      className="relative transition-all duration-200"
+      style={{ transform: isFilled ? "scale(1.05)" : "scale(1)" }}
+    >
+      <input
+        ref={inputRef as any}
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        disabled={disabled}
+        aria-label={`Digit ${index + 1}`}
+        className={`
+          w-12 h-14 text-center font-bold text-xl rounded-2xl
+          border-2 outline-none transition-all duration-200
+          bg-white dark:bg-[#282A2C]
+          text-[#1f1f1f] dark:text-[#E3E3E3]
+          ${focused
+            ? "border-[#0B57D0] dark:border-[#A8C7FA] shadow-[0_0_0_3px_rgba(11,87,208,0.12)]"
+            : isFilled
+            ? "border-[#1e8e3e] dark:border-[#81c995] bg-[#f0fdf4] dark:bg-[#1a2f1a]"
+            : "border-[#e0e3e7] dark:border-[#3c4043]"}
+          ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-text"}
+          caret-transparent
+        `}
+      />
+      {isFilled && !focused && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          {/* subtle dot indicator already shown by the value */}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Error banner ─────────────────────────────────────────────────────────────
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="w-full flex gap-2.5 p-3.5 rounded-2xl border border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300 text-xs animate-slide-up-fade">
+      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-500 dark:text-rose-400" />
+      <span className="leading-relaxed font-medium">{message}</span>
+    </div>
+  );
+}
+
+// ─── Primary action button ────────────────────────────────────────────────────
+function PrimaryButton({
+  loading,
+  loadingLabel,
+  label,
+  disabled,
+  type = "submit",
+  onClick,
+}: {
+  loading: boolean;
+  loadingLabel: string;
+  label: string;
+  disabled?: boolean;
+  type?: "submit" | "button";
+  onClick?: () => void;
+}) {
+  return (
+    <Button
+      type={type}
+      disabled={disabled ?? loading}
+      onClick={onClick}
+      className={`
+        w-full h-12 rounded-full text-sm font-medium
+        bg-[#0B57D0] hover:bg-[#0842A0] active:bg-[#063177]
+        dark:bg-[#A8C7FA] dark:hover:bg-[#c2d8fb] dark:active:bg-[#d3e3fd]
+        dark:text-[#062E6F]
+        text-white shadow-sm
+        transition-all duration-200
+        cursor-pointer
+        disabled:opacity-60 disabled:cursor-not-allowed
+        relative overflow-hidden
+      `}
+    >
+      <span className={`flex items-center justify-center gap-2 transition-all duration-200 ${loading ? "opacity-0" : "opacity-100"}`}>
+        {label}
+      </span>
+      {loading && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="ml-2">{loadingLabel}</span>
+        </span>
+      )}
+    </Button>
+  );
+}
+
+// ─── Ghost back button ────────────────────────────────────────────────────────
+function BackButton({ onClick, disabled, label }: { onClick: () => void; disabled?: boolean; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      disabled={disabled}
+      onClick={onClick}
+      className="w-full h-10 rounded-full hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] flex gap-2 justify-center items-center text-xs font-medium text-[#0B57D0] dark:text-[#A8C7FA] transition-all duration-200 cursor-pointer"
+    >
+      <ArrowLeft className="h-3.5 w-3.5" />
+      {label}
+    </Button>
+  );
+}
+
+// ─── Main AuthPage ────────────────────────────────────────────────────────────
 export default function AuthPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
-  
+
   // Auth credential check
   const [configApiId, setConfigApiId] = useState<number | null>(null);
   const [configApiHash, setConfigApiHash] = useState<string | null>(null);
   const [checkingConfig, setCheckingConfig] = useState(true);
 
-  // States
-  const [step, setStep] = useState<"phone" | "otp" | "password" | "bootstrap">("phone");
+  // Step state
+  const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [phoneCodeHash, setPhoneCodeHash] = useState("");
   const [otp, setOtp] = useState<string[]>(["", "", "", "", ""]);
@@ -46,18 +264,15 @@ export default function AuthPage() {
     useRef<HTMLInputElement>(null),
   ];
 
+  // Load API credentials from vault on mount
   useEffect(() => {
     async function loadConfig() {
       try {
         const id = await getSecret(VAULT_KEY_API_ID);
         const hash = await getSecret(VAULT_KEY_API_HASH);
-        // Use custom vault credentials if present, otherwise fall back to built-in defaults.
-        // This allows any user to log in immediately without configuring their own API app.
         setConfigApiId(id ? parseInt(id) : DEFAULT_API_ID);
         setConfigApiHash(hash || DEFAULT_API_HASH);
-      } catch (err) {
-        console.error("Failed to load credentials config from vault:", err);
-        // Even on vault error, fall back to defaults so login remains functional
+      } catch {
         setConfigApiId(DEFAULT_API_ID);
         setConfigApiHash(DEFAULT_API_HASH);
       } finally {
@@ -67,16 +282,18 @@ export default function AuthPage() {
     loadConfig();
   }, []);
 
+  // Auto-focus first OTP box when entering that step
+  useEffect(() => {
+    if (step === "otp") {
+      setTimeout(() => otpRefs[0].current?.focus(), 100);
+    }
+  }, [step]);
+
+  // ── Step 1: Send code ────────────────────────────────────────────────────
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phone.trim()) {
-      setError("Phone number is required");
-      return;
-    }
-    if (!configApiId || !configApiHash) {
-      setError("Please configure API ID and API Hash in Settings first.");
-      return;
-    }
+    if (!phone.trim()) { setError("Phone number is required"); return; }
+    if (!configApiId || !configApiHash) { setError("API credentials not configured."); return; }
 
     setLoading(true);
     setError(null);
@@ -84,7 +301,7 @@ export default function AuthPage() {
     try {
       await initClient(configApiId, configApiHash);
       const client = getClient();
-      
+
       const result = await client.invoke(
         new Api.auth.SendCode({
           phoneNumber: phone.trim(),
@@ -96,25 +313,22 @@ export default function AuthPage() {
 
       setPhoneCodeHash((result as any).phoneCodeHash);
       setStep("otp");
-      toast.success("Verification code sent to your Telegram account!");
+      toast.success("Verification code sent to your Telegram!");
     } catch (err: any) {
       console.error("Send code failed:", err);
-      setError(err.message || "Failed to send code. Make sure country code is correct.");
+      setError(err.message || "Failed to send code. Make sure the country code is correct.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Step 2: Verify OTP ───────────────────────────────────────────────────
   const handleOtpChange = (index: number, val: string) => {
     const cleanVal = val.replace(/[^0-9]/g, "").slice(0, 1);
     const newOtp = [...otp];
     newOtp[index] = cleanVal;
     setOtp(newOtp);
-
-    // Auto-focus next box if digit entered
-    if (cleanVal && index < 4) {
-      otpRefs[index + 1].current?.focus();
-    }
+    if (cleanVal && index < 4) otpRefs[index + 1].current?.focus();
   };
 
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -126,20 +340,19 @@ export default function AuthPage() {
   const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const data = e.clipboardData.getData("text").replace(/[^0-9]/g, "").slice(0, 5);
-    if (data.length === 5) {
-      const newOtp = data.split("");
+    if (data.length > 0) {
+      const newOtp = [...otp];
+      data.split("").forEach((d, i) => { if (i < 5) newOtp[i] = d; });
       setOtp(newOtp);
-      otpRefs[4].current?.focus();
+      const focusIndex = Math.min(data.length, 4);
+      otpRefs[focusIndex].current?.focus();
     }
   };
 
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = otp.join("");
-    if (code.length !== 5) {
-      setError("Please enter the complete 5-digit code.");
-      return;
-    }
+    if (code.length !== 5) { setError("Please enter the complete 5-digit code."); return; }
     if (!configApiId || !configApiHash) return;
 
     setLoading(true);
@@ -147,7 +360,7 @@ export default function AuthPage() {
 
     try {
       const client = getClient();
-      
+
       try {
         await client.invoke(
           new Api.auth.SignIn({
@@ -156,11 +369,9 @@ export default function AuthPage() {
             phoneCode: code,
           })
         );
-        
-        // Logged in successfully
         await completeAuthentication(client);
       } catch (err: any) {
-        if (err.message.includes("SESSION_PASSWORD_NEEDED")) {
+        if (err.message?.includes("SESSION_PASSWORD_NEEDED")) {
           setStep("password");
         } else {
           throw err;
@@ -169,7 +380,6 @@ export default function AuthPage() {
     } catch (err: any) {
       console.error("OTP verification failed:", err);
       setError(err.message || "Invalid verification code.");
-      // Clear otp digits on error
       setOtp(["", "", "", "", ""]);
       otpRefs[0].current?.focus();
     } finally {
@@ -177,12 +387,10 @@ export default function AuthPage() {
     }
   };
 
+  // ── Step 3: 2FA password ─────────────────────────────────────────────────
   const handleVerifyPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) {
-      setError("Password is required.");
-      return;
-    }
+    if (!password) { setError("Password is required."); return; }
 
     setLoading(true);
     setError(null);
@@ -191,62 +399,41 @@ export default function AuthPage() {
       const client = getClient();
       const passwordConfig = await client.invoke(new Api.account.GetPassword());
 
-      // --- GramJS browser/webview polyfill fix ---
-      // The Telegram server response is decoded by GramJS using the Node Buffer
-      // polyfill. In Tauri's webview, multiple polyfill instances can be bundled,
-      // creating "Buffer3" objects (a different subclass of Uint8Array) that break
-      // two internal GramJS checks:
-      //
-      //  1. sha256/pbkdf2 in computeHash receives a "Buffer3" that crypto.subtle
-      //     doesn't accept → "Bytes or str expected, not Buffer3"
-      //  2. goodPrime.equals(algo.p) in checkPrimeAndGood receives a plain Uint8Array
-      //     after the previous "fix" and the polyfill's .equals() throws because
-      //     it only accepts Buffer instances → "bad /g in password"
-      //
-      // Fix: re-materialise every byte field with Buffer.from() using the SAME
-      // polyfill instance that GramJS uses internally. Buffer.from(anyUint8Array)
-      // always creates a proper Buffer from the active polyfill, satisfying both
-      // sha256 (needs a BufferSource) and Buffer.equals() (needs a Buffer).
-      const algo = passwordConfig.currentAlgo as any;
-      if (algo) {
-        if (algo.p)     algo.p     = Buffer.from(algo.p);
-        if (algo.salt1) algo.salt1 = Buffer.from(algo.salt1);
-        if (algo.salt2) algo.salt2 = Buffer.from(algo.salt2);
-      }
-      if ((passwordConfig as any).srpB) {
-        (passwordConfig as any).srpB = Buffer.from((passwordConfig as any).srpB);
-      }
-      // -------------------------------------------
-
-      const srpResult = await computeCheck(passwordConfig, password);
+      // safeComputeCheck handles all Buffer polyfill issues across platforms
+      // (macOS, Windows WebView2, Linux). See src/lib/telegram/srp-helper.ts.
+      const srpResult = await safeComputeCheck(passwordConfig as any, password);
 
       await client.invoke(
-        new Api.auth.CheckPassword({
-          password: srpResult,
-        })
+        new Api.auth.CheckPassword({ password: srpResult })
       );
 
       await completeAuthentication(client);
     } catch (err: any) {
       console.error("2FA Verification failed:", err);
-      setError(err.message || "Incorrect cloud password.");
+      const msg = err.message || "";
+      // Translate raw Telegram errors into user-friendly messages
+      if (msg.includes("PASSWORD_HASH_INVALID") || msg.includes("Incorrect password") || msg.includes("hash")) {
+        setError("Incorrect password. Please check and try again.");
+      } else if (msg.includes("Platform compatibility")) {
+        setError(msg);
+      } else {
+        setError(msg || "Incorrect cloud password. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Shared: complete auth flow ───────────────────────────────────────────
   const completeAuthentication = async (client: any) => {
     const sessionString = client.session.save() as string;
 
-    // ── Primary: save session to the Rust file-backed store ──────────────────
-    // This is reliable, fast, and survives dev-server restarts.
     try {
       await invoke("save_session", { session: sessionString, phone: phone.trim() });
     } catch (saveErr) {
       console.error("save_session (Rust) failed:", saveErr);
     }
 
-    // ── Secondary: also persist to Stronghold vault (best-effort) ────────────
     try {
       await saveSecret(VAULT_KEY_SESSION, sessionString);
       await saveSecret(VAULT_KEY_PHONE, phone.trim());
@@ -254,283 +441,308 @@ export default function AuthPage() {
       console.warn("Stronghold saveSecret failed (non-fatal):", vaultErr);
     }
 
-    // ── Bootstrap (load Telegram index → set files in store) ───────────────
-    // Run inline BEFORE `setSession` so the AuthPage stays mounted through
-    // the whole flow. If we set `isAuthenticated=true` first, the GuestRoute
-    // immediately navigates to /drive/my-drive and UNMOUNTS AuthPage —
-    // which silently drops the bootstrap useEffect's setFiles() call and
-    // leaves the user on a blank drive page after re-login.
-    //
-    // By awaiting bootstrapTeleDrive here, files land in the file store
-    // BEFORE we flip auth, so the user lands on /drive/my-drive with all
-    // 37 files already visible.
     setStep("bootstrap");
     try {
       await bootstrapTeleDrive((status) => {
         setBootstrapStatus(status);
       }, phone.trim());
       toast.success("TeleDrive is ready!");
-      // Now it's safe to flip auth — the bootstrap is fully done and the
-      // file store is hydrated. GuestRoute will navigate to /drive/my-drive
-      // and FileBrowser will see all 37 files.
       setSession(sessionString, phone.trim());
       navigate("/drive/my-drive");
     } catch (err: any) {
       console.error("Bootstrap failed:", err);
       setBootstrapError(err.message || "Failed to bootstrap storage channel. Please retry.");
-      // Don't navigate; stay on the bootstrap screen so the user sees the error.
     }
   };
 
-  // Bootstrap is awaited inline in `completeAuthentication` BEFORE we call
-  // `setSession`. That ordering is what keeps the GuestRoute from
-  // unmounting AuthPage mid-bootstrap (which used to silently drop the
-  // setFiles() call and leave the user with an empty drive page after
-  // re-login). The `step === "bootstrap"` state is kept only to render
-  // the bootstrap status screen.
-
+  // ── Loading screen ───────────────────────────────────────────────────────
   if (checkingConfig) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground select-none">
+      <div className="flex h-screen w-screen items-center justify-center bg-background select-none">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-9 w-9 animate-spin text-[#0B57D0] dark:text-[#A8C7FA]" />
-          <span className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">Loading Configuration...</span>
+          <div className="relative">
+            <div className="h-12 w-12 rounded-full border-2 border-[#e0e3e7] dark:border-[#3c4043]" />
+            <Loader2 className="h-12 w-12 animate-spin text-[#0B57D0] dark:text-[#A8C7FA] absolute inset-0" />
+          </div>
+          <span className="text-xs font-medium text-[#747775] dark:text-[#9aa0a6] mt-1">
+            Loading TeleDrive...
+          </span>
         </div>
       </div>
     );
   }
 
+  // ── Main render ──────────────────────────────────────────────────────────
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background text-foreground p-4 relative select-none">
-      <Card className="w-full max-w-md p-8 md:p-10 bg-surface dark:bg-[#1E1F20] border border-slate-200/80 dark:border-slate-800/80 shadow-md rounded-3xl relative z-10 animate-fade-in transition-all">
-        <div className="text-center mb-6 flex flex-col items-center">
-          <Link to="/drive/my-drive" className="inline-flex items-center gap-2.5 mb-3 group">
-            <img
-              src="/teledrive.png"
-              alt="TeleDrive Logo"
-              className="h-10 w-10 object-contain"
-            />
-            <span className="text-2xl font-semibold tracking-tight text-[#1F1F1F] dark:text-[#E3E3E3]">
-              TeleDrive
-            </span>
-          </Link>
+    <div className="flex items-center justify-center min-h-screen bg-background relative select-none overflow-hidden">
+      {/* Decorative background blobs */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        aria-hidden="true"
+      >
+        <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full opacity-[0.04] dark:opacity-[0.03]"
+          style={{ background: "radial-gradient(circle, #0B57D0, transparent 70%)" }} />
+        <div className="absolute bottom-[-15%] left-[-10%] w-[500px] h-[500px] rounded-full opacity-[0.03] dark:opacity-[0.02]"
+          style={{ background: "radial-gradient(circle, #1e8e3e, transparent 70%)" }} />
+      </div>
 
+      {/* Card */}
+      <div className="relative z-10 w-full max-w-[400px] mx-4 animate-fade-in">
+        <div className="bg-white dark:bg-[#1E1F20] border border-[#e0e3e7] dark:border-[#2d2f31] rounded-3xl shadow-[0_4px_32px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_32px_rgba(0,0,0,0.3)] p-8 md:p-10">
+
+          {/* Logo */}
+          <div className="flex flex-col items-center mb-8">
+            <Link to="/drive/my-drive" className="inline-flex items-center gap-2.5 group mb-1">
+              <div className="relative">
+                <img
+                  src="/teledrive.png"
+                  alt="TeleDrive"
+                  className="h-10 w-10 object-contain transition-transform duration-300 group-hover:scale-110"
+                />
+              </div>
+              <span className="text-2xl font-semibold tracking-tight text-[#1F1F1F] dark:text-[#E3E3E3]">
+                TeleDrive
+              </span>
+            </Link>
+            <p className="text-[10px] font-medium tracking-widest uppercase text-[#9aa0a6] dark:text-[#747775] mt-1">
+              Cloud Storage
+            </p>
+          </div>
+
+          {/* Error banner — shown above step content */}
           {error && (
-            <div className="w-full flex gap-2.5 p-3 rounded-2xl border border-rose-200 bg-rose-50/60 dark:border-rose-900/40 dark:bg-rose-950/20 text-rose-650 dark:text-rose-400 text-xs text-left mb-2 animate-fade-in">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-500" />
-              <span className="leading-relaxed font-medium">{error}</span>
+            <div className="mb-5">
+              <ErrorBanner message={error} />
+            </div>
+          )}
+
+          {/* ── STEP 1: Phone ─────────────────────────────────────────── */}
+          {step === "phone" && (
+            <form onSubmit={handleSendCode} className="space-y-5 animate-slide-up-fade" noValidate>
+              <div className="text-center space-y-1.5 mb-6">
+                <h1 className="text-[22px] font-normal text-[#1F1F1F] dark:text-[#E3E3E3] leading-tight">
+                  Sign in
+                </h1>
+                <p className="text-sm text-[#747775] dark:text-[#9aa0a6] leading-relaxed">
+                  Use your Telegram account to continue
+                </p>
+              </div>
+
+              <FloatingInput
+                id="phone-number"
+                label="Phone number (+country code)"
+                type="tel"
+                value={phone}
+                onChange={(e) => { setPhone(e.target.value); setError(null); }}
+                disabled={loading}
+                autoComplete="tel"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.form?.requestSubmit(); }}
+              />
+
+              <div className="pt-1">
+                <PrimaryButton
+                  loading={loading}
+                  loadingLabel="Sending code..."
+                  label="Next"
+                  disabled={loading || !phone.trim()}
+                />
+              </div>
+
+              <p className="text-center text-[11px] text-[#9aa0a6] dark:text-[#747775] leading-relaxed pt-1">
+                By continuing, you agree to our{" "}
+                <span className="text-[#0B57D0] dark:text-[#A8C7FA] cursor-pointer hover:underline">Terms of Service</span>
+              </p>
+            </form>
+          )}
+
+          {/* ── STEP 2: OTP ───────────────────────────────────────────── */}
+          {step === "otp" && (
+            <form onSubmit={handleVerifyOTP} className="space-y-6 animate-slide-up-fade" noValidate>
+              <div className="text-center space-y-1.5">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#EDF2FC] dark:bg-[#1a2744] mb-3">
+                  <MessageSquare className="h-5 w-5 text-[#0B57D0] dark:text-[#A8C7FA]" />
+                </div>
+                <h1 className="text-[22px] font-normal text-[#1F1F1F] dark:text-[#E3E3E3] leading-tight">
+                  Verify your number
+                </h1>
+                <p className="text-sm text-[#747775] dark:text-[#9aa0a6] leading-relaxed">
+                  We sent a code to{" "}
+                  <button
+                    type="button"
+                    onClick={() => { if (!loading) setStep("phone"); }}
+                    className="font-semibold text-[#1F1F1F] dark:text-[#E3E3E3] hover:text-[#0B57D0] dark:hover:text-[#A8C7FA] transition-colors underline-offset-2 hover:underline cursor-pointer"
+                  >
+                    {phone}
+                  </button>
+                </p>
+              </div>
+
+              {/* OTP boxes */}
+              <div className="flex justify-between gap-2 my-2">
+                {otp.map((digit, idx) => (
+                  <OtpBox
+                    key={idx}
+                    index={idx}
+                    value={digit}
+                    isFilled={digit.length > 0}
+                    inputRef={otpRefs[idx]}
+                    disabled={loading}
+                    onChange={(val) => handleOtpChange(idx, val)}
+                    onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                    onPaste={handleOtpPaste}
+                  />
+                ))}
+              </div>
+
+              {/* Progress strip */}
+              <div className="flex gap-1.5">
+                {otp.map((d, i) => (
+                  <div
+                    key={i}
+                    className="flex-1 h-0.5 rounded-full transition-all duration-300"
+                    style={{ background: d ? "#0B57D0" : "#e0e3e7" }}
+                  />
+                ))}
+              </div>
+
+              <div className="space-y-2.5">
+                <PrimaryButton
+                  loading={loading}
+                  loadingLabel="Verifying..."
+                  label="Verify"
+                  disabled={loading || otp.join("").length !== 5}
+                />
+                <BackButton
+                  disabled={loading}
+                  onClick={() => { setStep("phone"); setOtp(["", "", "", "", ""]); setError(null); }}
+                  label="Try a different number"
+                />
+              </div>
+            </form>
+          )}
+
+          {/* ── STEP 3: 2FA Password ──────────────────────────────────── */}
+          {step === "password" && (
+            <form onSubmit={handleVerifyPassword} className="space-y-5 animate-slide-up-fade" noValidate>
+              <div className="text-center space-y-1.5">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FFF4EC] dark:bg-[#2a1f10] mb-3">
+                  <Lock className="h-5 w-5 text-[#F9AB00] dark:text-[#fdd663]" />
+                </div>
+                <h1 className="text-[22px] font-normal text-[#1F1F1F] dark:text-[#E3E3E3] leading-tight">
+                  Two-Step Verification
+                </h1>
+                <p className="text-sm text-[#747775] dark:text-[#9aa0a6] leading-relaxed">
+                  Your account has an additional cloud password
+                </p>
+              </div>
+
+              <div className="mt-2">
+                <FloatingInput
+                  id="cloud-password"
+                  label="Cloud password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                  disabled={loading}
+                  autoFocus
+                  autoComplete="current-password"
+                  suffix={
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="text-[#747775] hover:text-[#1F1F1F] dark:hover:text-[#E3E3E3] transition-colors p-1 rounded-lg cursor-pointer"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  }
+                />
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                <PrimaryButton
+                  loading={loading}
+                  loadingLabel="Signing in..."
+                  label="Sign in"
+                  disabled={loading || !password}
+                />
+                <BackButton
+                  disabled={loading}
+                  onClick={() => { setStep("otp"); setPassword(""); setError(null); }}
+                  label="Back to code verification"
+                />
+              </div>
+            </form>
+          )}
+
+          {/* ── STEP 4: Bootstrap ─────────────────────────────────────── */}
+          {step === "bootstrap" && (
+            <div className="space-y-6 py-2 text-center animate-slide-up-fade">
+              <div className="flex flex-col items-center gap-1.5 mb-2">
+                <h1 className="text-[22px] font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">
+                  Setting up your Drive
+                </h1>
+                <p className="text-sm text-[#747775] dark:text-[#9aa0a6]">
+                  Preparing your personal Telegram storage…
+                </p>
+              </div>
+
+              {bootstrapError ? (
+                <div className="space-y-4">
+                  <ErrorBanner message={bootstrapError} />
+                  <PrimaryButton
+                    type="button"
+                    loading={false}
+                    loadingLabel=""
+                    label="Retry Setup"
+                    onClick={() => {
+                      setBootstrapError(null);
+                      setBootstrapStatus("Reconnecting to Telegram...");
+                      setStep("phone");
+                      setTimeout(() => setStep("bootstrap"), 50);
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-5 py-6">
+                  {/* Animated spinner ring */}
+                  <div className="relative w-16 h-16">
+                    <div className="absolute inset-0 rounded-full border-2 border-[#e0e3e7] dark:border-[#3c4043]" />
+                    <div
+                      className="absolute inset-0 rounded-full border-2 border-transparent animate-spin"
+                      style={{
+                        borderTopColor: "#0B57D0",
+                        borderRightColor: "rgba(11,87,208,0.3)",
+                        animationDuration: "0.8s",
+                      }}
+                    />
+                    <div className="absolute inset-[6px] flex items-center justify-center">
+                      <img src="/teledrive.png" alt="" className="h-7 w-7 object-contain opacity-80" />
+                    </div>
+                  </div>
+                  <span className="text-xs font-medium text-[#747775] dark:text-[#9aa0a6] bg-[#F0F4F9] dark:bg-[#282A2C] px-4 py-1.5 rounded-full border border-[#e0e3e7] dark:border-[#3c4043] transition-all duration-500">
+                    {bootstrapStatus}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step dots (phone, otp, password only) */}
+          {step !== "bootstrap" && (
+            <div className="mt-8">
+              <StepDots current={step} />
             </div>
           )}
         </div>
 
-        {/* STEP 1: Phone number input */}
-        {step === "phone" && (
-          <form onSubmit={handleSendCode} className="space-y-5 animate-slide-up-fade">
-            <div className="text-center space-y-1 mb-6">
-              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Sign in</h3>
-              <p className="text-sm text-[#444746] dark:text-[#C4C7C5]">
-                Use your Telegram account to continue to TeleDrive
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone-number" className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">
-                Phone number
-              </Label>
-              <Input
-                id="phone-number"
-                type="tel"
-                placeholder="+1 555-0199"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                disabled={loading}
-                className="rounded-xl h-12 border-slate-300 dark:border-slate-600 focus-visible:ring-[#0B57D0] focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all text-sm"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading || !phone.trim()}
-              className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending code...
-                </>
-              ) : (
-                "Next"
-              )}
-            </Button>
-          </form>
-        )}
-
-        {/* STEP 2: OTP verification code */}
-        {step === "otp" && (
-          <form onSubmit={handleVerifyOTP} className="space-y-6 animate-slide-up-fade">
-            <div className="text-center space-y-1">
-              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Verification code</h3>
-              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
-                Telegram sent a code to your other devices or SMS for <strong className="text-[#1F1F1F] dark:text-[#E3E3E3]">{phone}</strong>
-              </p>
-            </div>
-
-            <div className="flex justify-between gap-2.5 my-6">
-              {otp.map((digit, idx) => (
-                <Input
-                  key={idx}
-                  ref={otpRefs[idx]}
-                  type="text"
-                  pattern="[0-9]*"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handleOtpChange(idx, e.target.value)}
-                  onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                  onPaste={handleOtpPaste}
-                  disabled={loading}
-                  className="w-12 h-14 text-center font-bold text-xl rounded-2xl border-slate-300 dark:border-slate-600 focus-visible:ring-2 focus-visible:ring-[#0B57D0]/20 focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all shadow-xs"
-                />
-              ))}
-            </div>
-
-            <div className="space-y-3">
-              <Button
-                type="submit"
-                disabled={loading || otp.join("").length !== 5}
-                className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  "Verify"
-                )}
-              </Button>
-              
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={loading}
-                onClick={() => setStep("phone")}
-                className="w-full h-10 rounded-full hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] flex gap-2 justify-center items-center text-xs font-medium text-[#0B57D0] dark:text-[#A8C7FA] transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Try a different phone number
-              </Button>
-            </div>
-          </form>
-        )}
-
-        {/* STEP 3: 2FA Cloud password */}
-        {step === "password" && (
-          <form onSubmit={handleVerifyPassword} className="space-y-5 animate-slide-up-fade">
-            <div className="text-center space-y-1">
-              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">Two-Step Verification</h3>
-              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
-                Your Telegram account is protected by an additional cloud password.
-              </p>
-            </div>
-
-            <div className="space-y-2 mt-4">
-              <Label htmlFor="cloud-password" className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5]">
-                Password
-              </Label>
-              <div className="relative">
-                <Input
-                  id="cloud-password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your 2FA password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                  className="rounded-xl h-12 pr-10 border-slate-300 dark:border-slate-600 focus-visible:ring-[#0B57D0] focus-visible:border-[#0B57D0] bg-white dark:bg-[#282A2C] transition-all text-sm"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-1 top-1.5 h-9 w-9 hover:bg-transparent text-[#747775] hover:text-[#1F1F1F] dark:hover:text-[#E3E3E3] cursor-pointer"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <Button
-                type="submit"
-                disabled={loading || !password}
-                className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm transition-all cursor-pointer shadow-xs"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in...
-                  </>
-                ) : (
-                  "Sign in"
-                )}
-              </Button>
-              
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={loading}
-                onClick={() => setStep("otp")}
-                className="w-full h-10 rounded-full hover:bg-[#EDF2FC] dark:hover:bg-[#282A2C] flex gap-2 justify-center items-center text-xs font-medium text-[#0B57D0] dark:text-[#A8C7FA] transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to code verification
-              </Button>
-            </div>
-          </form>
-        )}
-
-        {/* STEP 4: Bootstrapping TeleDrive */}
-        {step === "bootstrap" && (
-          <div className="space-y-6 py-4 text-center animate-slide-up-fade">
-            <div className="space-y-1">
-              <h3 className="text-xl font-normal text-[#1F1F1F] dark:text-[#E3E3E3]">
-                Setting up your Drive
-              </h3>
-              <p className="text-xs text-[#444746] dark:text-[#C4C7C5] leading-relaxed">
-                Initializing your personal Telegram cloud storage workspace.
-              </p>
-            </div>
-
-            {bootstrapError ? (
-              <div className="space-y-4">
-                <div className="flex gap-2.5 p-3.5 rounded-2xl border border-rose-200 bg-rose-50/50 dark:border-rose-950/40 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs text-left">
-                  <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5 text-rose-500" />
-                  <span className="leading-relaxed font-medium">{bootstrapError}</span>
-                </div>
-                <Button
-                  onClick={() => {
-                     setBootstrapError(null);
-                     setBootstrapStatus("Reconnecting to Telegram...");
-                     setStep("phone");
-                     setTimeout(() => setStep("bootstrap"), 50);
-                  }}
-                  className="w-full h-11 rounded-full bg-[#0B57D0] hover:bg-[#0842A0] text-white dark:bg-[#A8C7FA] dark:hover:bg-[#D3E3FD] dark:text-[#062E6F] font-medium text-sm shadow-xs cursor-pointer"
-                >
-                  Retry Setup
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-5 py-6">
-                <Loader2 className="h-10 w-10 animate-spin text-[#0B57D0] dark:text-[#A8C7FA] stroke-[2]" />
-                <span className="text-xs font-medium text-[#444746] dark:text-[#C4C7C5] bg-[#F0F4F9] dark:bg-[#282A2C] px-4 py-1.5 rounded-full border border-slate-200/60 dark:border-slate-700/60">
-                  {bootstrapStatus}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
+        {/* Footer note */}
+        <p className="text-center text-[11px] text-[#9aa0a6] dark:text-[#5f6368] mt-4">
+          Secured by Telegram MTProto · v0.1.1
+        </p>
+      </div>
     </div>
   );
 }
