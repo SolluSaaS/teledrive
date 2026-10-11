@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "build:dmg": "bash release-dist/build_dmg.sh",
-    "build:exe": "node scripts/build-exe.cjs"
+    "build:exe": "node scripts/build-exe.cjs",
+    "build:linux": "tauri build --bundles deb,appimage"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
