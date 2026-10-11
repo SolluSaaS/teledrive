@@ -7,7 +7,7 @@
  * Edit mode  → CodeEditor (CodeMirror 6, lazy, theme-aware via Compartment)
  * Binary     → native <img>, <video>, <audio>, <iframe>
  */
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from "react";
 import {
   X,
   Download,
@@ -64,7 +64,35 @@ import { useDarkMode } from "@/hooks/useDarkMode";
 import { SyntaxHighlighter } from "./SyntaxHighlighter";
 import { CodeEditor } from "./CodeEditor";
 import { CsvTableViewer } from "./CsvTableViewer";
+import { PdfViewer } from "./PdfViewer";
 import { toast } from "sonner";
+
+// ─── PDF-specific Error Boundary (isolates PDF crashes from the rest of the modal)
+class PdfErrorBoundary extends Component<{ children: ReactNode; onRetry?: () => void }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) { console.error("[PdfErrorBoundary] PDF viewer crashed:", err); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-[#1a1b1e] text-white p-6 text-center select-none">
+          <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 mb-4">
+            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+          </div>
+          <h3 className="text-base font-semibold mb-2">PDF viewer encountered an error</h3>
+          <p className="text-sm text-slate-400 mb-5">The PDF could not be rendered. Try reloading.</p>
+          <button
+            onClick={() => { this.setState({ hasError: false }); this.props.onRetry?.(); }}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import DOMPurify from "dompurify";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
@@ -186,6 +214,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   const [isDragging, setIsDragging]   = useState(false);
   const [dragStart, setDragStart]     = useState({ x: 0, y: 0 });
   const pdfBufferRef                  = useRef<Uint8Array | null>(null);
+  const [pdfData, setPdfData]         = useState<Uint8Array | null>(null);
 
   // ── Video preview states & refs ──────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -553,6 +582,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       setContentUrl(null); setTextContent(null); setMarkdownHtml(null);
       setError(null); setIsEditMode(false); setEditContent(""); setSaveStatus("idle");
       pdfBufferRef.current = null;
+      setPdfData(null);
       return;
     }
 
@@ -564,6 +594,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       setMdViewMode("preview"); setCsvViewMode("table"); setSvgViewMode("image");
       setWrapLines(false); setCopiedCode(false);
       pdfBufferRef.current = null;
+      setPdfData(null);
 
       try {
         let buffer: Uint8Array;
@@ -595,6 +626,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
         if (isPdfFile) {
           pdfBufferRef.current = buffer;
+          setPdfData(buffer);
         }
 
         // Always create Blob URL for media, pdf, and SVG visual rendering
@@ -744,7 +776,13 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         }
       }
 
-      await openPath(tempFilePath);
+      try {
+        await openPath(tempFilePath);
+      } catch (openerErr) {
+        console.warn("plugin-opener failed, invoking native open_file_in_system_viewer:", openerErr);
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("open_file_in_system_viewer", { path: tempFilePath });
+      }
       toast.success("Opened document in system viewer.");
     } catch (err: any) {
       console.error("Failed to open document in system app:", err);
@@ -1844,35 +1882,15 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             )}
 
             {/* PDF */}
-            {isPdf && contentUrl && (
-              <div className="absolute inset-0 w-full h-full flex flex-col bg-[#323639]">
-                <object
-                  data={`${contentUrl}#toolbar=1`}
-                  type="application/pdf"
-                  className="w-full h-full border-0"
-                >
-                  <iframe
-                    src={contentUrl}
-                    title={file.name}
-                    className="w-full h-full border-0"
-                    style={{ background: "#323639" }}
-                  >
-                    <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-white">
-                      <FileText className="h-16 w-16 text-red-400 mb-4" />
-                      <h3 className="text-lg font-semibold mb-2">{file.name}</h3>
-                      <p className="text-sm text-slate-300 mb-6 max-w-sm">
-                        Click below to view this document in your default PDF viewer.
-                      </p>
-                      <button
-                        onClick={handleOpenInSystemApp}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm cursor-pointer shadow-md transition-colors"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        Open in System PDF Viewer
-                      </button>
-                    </div>
-                  </iframe>
-                </object>
+            {isPdf && (
+              <div className="absolute inset-0 w-full h-full flex flex-col">
+                <PdfErrorBoundary onRetry={() => setPdfData(pdfBufferRef.current ? new Uint8Array(pdfBufferRef.current) : null)}>
+                  <PdfViewer
+                    data={pdfData || pdfBufferRef.current}
+                    fileName={file.name}
+                    onOpenSystemApp={handleOpenInSystemApp}
+                  />
+                </PdfErrorBoundary>
               </div>
             )}
 

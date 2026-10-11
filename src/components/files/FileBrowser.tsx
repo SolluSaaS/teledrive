@@ -590,7 +590,13 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
         }
       }
 
-      await openPath(tempFilePath);
+      try {
+        await openPath(tempFilePath);
+      } catch (openerErr) {
+        console.warn("plugin-opener failed, invoking native open_file_in_system_viewer:", openerErr);
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("open_file_in_system_viewer", { path: tempFilePath });
+      }
       toast.success(`Opened "${file.name}" in system viewer.`);
     } catch (err: any) {
       console.error("Failed to open file in system app:", err);
