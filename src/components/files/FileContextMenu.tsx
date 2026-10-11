@@ -19,6 +19,7 @@ import {
   ArchiveRestore,
   CheckCircle,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import { TeleFile } from "@/lib/types";
 import { isEditableFile } from "@/lib/files/editableTypes";
@@ -28,6 +29,7 @@ interface FileContextMenuProps {
   children: React.ReactNode;
   onPreview: (file: TeleFile) => void;
   onDownload: (file: TeleFile) => void;
+  onOpenInSystemApp?: (file: TeleFile) => void;
   onEdit?: (file: TeleFile) => void;
   onRename: (file: TeleFile) => void;
   onStarToggle: (file: TeleFile) => void;
@@ -44,6 +46,7 @@ export const FileContextMenu = React.memo(function FileContextMenu({
   children,
   onPreview,
   onDownload,
+  onOpenInSystemApp,
   onEdit,
   onRename,
   onStarToggle,
@@ -67,6 +70,15 @@ export const FileContextMenu = React.memo(function FileContextMenu({
           >
             <Eye className="h-4 w-4 text-[#444746] dark:text-[#c4c7c5] shrink-0" strokeWidth={1.75} />
             <span>Preview</span>
+          </ContextMenuItem>
+        )}
+        {!isDirectory && !file.trashed && !file.archived && onOpenInSystemApp && (
+          <ContextMenuItem
+            onClick={() => onOpenInSystemApp(file)}
+            className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium cursor-pointer rounded-xl text-[#1f1f1f] dark:text-[#e3e3e3] hover:bg-[#f0f4f9] dark:hover:bg-[#333537]"
+          >
+            <ExternalLink className="h-4 w-4 text-[#444746] dark:text-[#c4c7c5] shrink-0" strokeWidth={1.75} />
+            <span>Open in System App</span>
           </ContextMenuItem>
         )}
         {!isDirectory && !file.trashed && !file.archived && onEdit && isEditableFile(file) && (

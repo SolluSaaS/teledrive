@@ -58,6 +58,7 @@ import { isEditableFile } from "@/lib/files/editableTypes";
 import { useFileBrowserDragAndDrop } from "@/hooks/useFileBrowserDragAndDrop";
 import { collapseDuplicateFolders, dedupeByContentKey, dedupeByMessageId, folderIdForPath } from "@/lib/storage/metadataStore";
 import { isBackupItem, BACKUP_ROOT, BACKUP_ROOT_PREFIX } from "@/lib/backup/visibility";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -556,6 +557,34 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const handleDownload = useCallback((file: TeleFile) => {
     window.dispatchEvent(new CustomEvent("teledrive-download-file", { detail: file }));
+  }, []);
+
+  const handleOpenSystemApp = useCallback(async (file: TeleFile) => {
+    try {
+      const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      const { downloadFileToBuffer } = await import("@/lib/telegram/downloader");
+      const { saveBinaryFile } = await import("@/lib/storage/safeFileWriter");
+      const { getOfflineFilePath } = await import("@/lib/storage/offlineStorage");
+
+      let filePathToOpen = "";
+      if (file.offline) {
+        filePathToOpen = await getOfflineFilePath(file.id);
+      } else {
+        toast.info(`Preparing "${file.name}" for system application...`);
+        const buf = await downloadFileToBuffer(file.channelId, file.messageId);
+        const cacheDir = await appLocalDataDir();
+        const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "file";
+        filePathToOpen = await join(cacheDir, `temp_${file.id}_${safeName}`);
+        await saveBinaryFile(filePathToOpen, buf);
+      }
+
+      await openPath(filePathToOpen);
+      toast.success(`Opened "${file.name}" in system viewer.`);
+    } catch (err: any) {
+      console.error("Failed to open file in system app:", err);
+      toast.error(`Could not open in system viewer: ${err.message || "Unknown error"}`);
+    }
   }, []);
 
   const triggerUpload = useCallback(() => {
@@ -1096,6 +1125,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       key={file.id}
                       file={file}
                       onPreview={toastPreview}
+                      onOpenInSystemApp={handleOpenSystemApp}
                       onEdit={handleEdit}
                       onDownload={handleDownload}
                       onRename={openRenameDialog}
@@ -1235,6 +1265,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     key={file.id}
                     file={file}
                     onPreview={toastPreview}
+                    onOpenInSystemApp={handleOpenSystemApp}
                     onEdit={handleEdit}
                     onDownload={handleDownload}
                     onRename={openRenameDialog}
