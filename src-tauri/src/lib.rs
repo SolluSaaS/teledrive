@@ -425,6 +425,54 @@ async fn read_file_chunk(
     .map_err(|e| format!("read_file_chunk join failed: {e}"))?
 }
 
+/// Native binary file writer that bypasses tauri-plugin-fs IPC quirks,
+/// capability scope limits, and Windows WebView2 payload drops.
+/// Automatically creates parent directories if needed.
+#[tauri::command]
+async fn write_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
+    use std::io::Write;
+    let path_owned = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path_owned);
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut file = std::fs::File::create(p)
+            .map_err(|e| format!("Failed to create file {path_owned}: {e}"))?;
+        file.write_all(&data)
+            .map_err(|e| format!("Failed to write data to {path_owned}: {e}"))?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("write_file_binary task join error: {e}"))?
+}
+
+/// Appends or writes a chunk of binary data to disk.
+/// Useful for chunked streaming writes of large files without memory spikes.
+#[tauri::command]
+async fn write_file_chunk(path: String, data: Vec<u8>, append: bool) -> Result<(), String> {
+    use std::io::Write;
+    let path_owned = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path_owned);
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(!append)
+            .append(append)
+            .open(p)
+            .map_err(|e| format!("Failed to open file {path_owned}: {e}"))?;
+        file.write_all(&data)
+            .map_err(|e| format!("Failed to write chunk to {path_owned}: {e}"))?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("write_file_chunk task join error: {e}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -462,6 +510,8 @@ pub fn run() {
             stop_backup_scheduler,
             read_dir_recursive,
             read_file_chunk,
+            write_file_binary,
+            write_file_chunk,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

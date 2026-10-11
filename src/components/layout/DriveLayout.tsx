@@ -246,7 +246,9 @@ export default function DriveLayout() {
     const handleDownloadTrigger = (e: Event) => {
       const file = (e as CustomEvent).detail as TeleFile;
       if (file) {
-        downloadFileFromTelegram(file.channelId, file.messageId, file.name);
+        downloadFileFromTelegram(file.channelId, file.messageId, file.name).catch((err) => {
+          console.error("Download failed:", err);
+        });
       }
     };
 

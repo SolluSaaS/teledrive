@@ -103,16 +103,6 @@ async function bootstrapTeleDriveInner(
   setFiles(files);
   useFileStore.getState().setBootstrapComplete(true);
 
-  // Debug dump to inspect files array
-  try {
-    const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
-    const dataDir = await appLocalDataDir();
-    const debugPath = await join(dataDir, "files_debug.json");
-    const { writeFile } = await import("@tauri-apps/plugin-fs");
-    await writeFile(debugPath, new TextEncoder().encode(JSON.stringify(files, null, 2)));
-  } catch (dumpErr) {
-    console.warn("[bootstrap] Failed to write files_debug.json:", dumpErr);
-  }
 
   // ── Manifest-merge step ───────────────────────────────────────────────
   // The local backup manifest (teledrive_backup_manifest_v1 in the vault)

@@ -54,6 +54,7 @@ import { updateFileLocal, deleteTelegramMessage } from "@/lib/storage/metadataSt
 import { uploadFileToTelegram } from "@/lib/telegram/uploader";
 import { enqueueSave } from "@/lib/storage/indexQueue";
 import { readOfflineCache } from "@/lib/storage/offlineStorage";
+import { saveBinaryFile } from "@/lib/storage/safeFileWriter";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
@@ -89,6 +90,8 @@ const O2_LANG_MAP: Record<string, string> = {
 
 function FileTypeIcon({ mime, name }: { mime: string; name: string }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const isPdf = ext === "pdf" || mime === "application/pdf" || (mime && mime.toLowerCase().includes("pdf"));
+  if (isPdf) return <FileText className="h-4 w-4 text-red-500 shrink-0" />;
   if (mime.startsWith("image/") || ext === "svg") return <ImageIcon className="h-4 w-4 text-purple-500 shrink-0" />;
   if (mime.startsWith("video/")) return <Film className="h-4 w-4 text-pink-500 shrink-0" />;
   if (mime.startsWith("audio/")) return <Music className="h-4 w-4 text-teal-500 shrink-0" />;
@@ -182,6 +185,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   const [dimensions, setDimensions]   = useState<{ width: number; height: number } | null>(null);
   const [isDragging, setIsDragging]   = useState(false);
   const [dragStart, setDragStart]     = useState({ x: 0, y: 0 });
+  const pdfBufferRef                  = useRef<Uint8Array | null>(null);
 
   // ── Video preview states & refs ──────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -548,6 +552,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       if (contentUrl) URL.revokeObjectURL(contentUrl);
       setContentUrl(null); setTextContent(null); setMarkdownHtml(null);
       setError(null); setIsEditMode(false); setEditContent(""); setSaveStatus("idle");
+      pdfBufferRef.current = null;
       return;
     }
 
@@ -558,6 +563,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
       setTextContent(null); setContentUrl(null); setMarkdownHtml(null);
       setMdViewMode("preview"); setCsvViewMode("table"); setSvgViewMode("image");
       setWrapLines(false); setCopiedCode(false);
+      pdfBufferRef.current = null;
 
       try {
         let buffer: Uint8Array;
@@ -582,18 +588,25 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         }
         if (!current) return;
 
-        const mimeLower = file.mime.toLowerCase();
+        const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+        const mimeLower = (file.mime || "").toLowerCase();
         const isSvgFile = file.name.toLowerCase().endsWith(".svg") || mimeLower === "image/svg+xml";
+        const isPdfFile = ext === "pdf" || mimeLower === "application/pdf" || mimeLower.includes("pdf");
+
+        if (isPdfFile) {
+          pdfBufferRef.current = buffer;
+        }
 
         // Always create Blob URL for media, pdf, and SVG visual rendering
         if (
           file.mime.startsWith("image/") ||
           file.mime.startsWith("video/") ||
           file.mime.startsWith("audio/") ||
-          file.mime === "application/pdf" ||
+          isPdfFile ||
           isSvgFile
         ) {
-          const blob = new Blob([buffer.buffer as ArrayBuffer], { type: isSvgFile ? "image/svg+xml" : file.mime });
+          const blobMime = isPdfFile ? "application/pdf" : isSvgFile ? "image/svg+xml" : file.mime;
+          const blob = new Blob([buffer as any], { type: blobMime });
           if (current) {
             setContentUrl((prev) => {
               if (prev) URL.revokeObjectURL(prev);
@@ -623,7 +636,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
         const shouldDecodeText = (
           isTextMime ||
           isEditableFile(file) ||
-          (!hasNullByte && !mimeLower.startsWith("image/") && !mimeLower.startsWith("video/") && !mimeLower.startsWith("audio/") && mimeLower !== "application/pdf") ||
+          (!hasNullByte && !mimeLower.startsWith("image/") && !mimeLower.startsWith("video/") && !mimeLower.startsWith("audio/") && !isPdfFile) ||
           isSvgFile
         );
 
@@ -655,8 +668,8 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             setEditContent(text);
             setIsEditMode(true);
           }
-        } else if (!contentUrl && !file.mime.startsWith("image/") && !file.mime.startsWith("video/") && !file.mime.startsWith("audio/") && file.mime !== "application/pdf") {
-          const blob = new Blob([buffer.buffer as ArrayBuffer], { type: file.mime });
+        } else if (!contentUrl && !file.mime.startsWith("image/") && !file.mime.startsWith("video/") && !file.mime.startsWith("audio/") && !isPdfFile) {
+          const blob = new Blob([buffer as any], { type: file.mime || "application/octet-stream" });
           if (current) {
             setContentUrl((prev) => {
               if (prev) URL.revokeObjectURL(prev);
@@ -692,7 +705,52 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
   // ── Handlers (memoized) ──────────────────────────────────────────────────
   const handleDownload = useCallback(() => {
-    if (file) downloadFileFromTelegram(file.channelId, file.messageId, file.name);
+    if (file) {
+      downloadFileFromTelegram(file.channelId, file.messageId, file.name).catch((err) => {
+        console.error("Download failed:", err);
+      });
+    }
+  }, [file]);
+
+  const handleOpenInSystemApp = useCallback(async () => {
+    if (!file) return;
+    try {
+      const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      const { exists } = await import("@tauri-apps/plugin-fs");
+      const { readOfflineCache, isCachedOffline } = await import("@/lib/storage/offlineStorage");
+
+      const cacheDir = await appLocalDataDir();
+      const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "document.pdf";
+      const tempFilePath = await join(cacheDir, `temp_${file.id}_${safeName}`);
+
+      let fileReady = false;
+      try {
+        fileReady = await exists(tempFilePath);
+      } catch (_) {
+        fileReady = false;
+      }
+
+      if (!fileReady) {
+        if (pdfBufferRef.current) {
+          await saveBinaryFile(tempFilePath, pdfBufferRef.current);
+        } else if (file.offline && (await isCachedOffline(file.id))) {
+          const offlineBuf = await readOfflineCache(file.id);
+          await saveBinaryFile(tempFilePath, offlineBuf);
+        } else {
+          toast.info("Preparing document for system viewer...");
+          const buf = await downloadFileToBuffer(file.channelId, file.messageId);
+          await saveBinaryFile(tempFilePath, buf);
+        }
+      }
+
+      await openPath(tempFilePath);
+      toast.success("Opened document in system viewer.");
+    } catch (err: any) {
+      console.error("Failed to open document in system app:", err);
+      toast.error("Could not open system viewer. Downloading file instead...");
+      downloadFileFromTelegram(file.channelId, file.messageId, file.name).catch(() => {});
+    }
   }, [file]);
 
   const handleEnterEdit = useCallback(() => {
@@ -849,7 +907,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
   const isImage         = (file?.mime?.startsWith("image/") ?? false) && !isSvg;
   const isVideo         = file?.mime?.startsWith("video/") ?? false;
   const isAudio         = file?.mime?.startsWith("audio/") ?? false;
-  const isPdf           = file?.mime === "application/pdf";
+  const isPdf           = ext === "pdf" || file?.mime === "application/pdf" || (file?.mime?.toLowerCase().includes("pdf") ?? false);
   const isMarkdownFile  = ext === "md" || ext === "markdown" || (file?.mime?.toLowerCase() === "text/markdown");
   const isCsvFile       = ext === "csv" || (file?.mime?.toLowerCase() === "text/csv");
   const isTsvFile       = ext === "tsv" || (file?.mime?.toLowerCase() === "text/tab-separated-values");
@@ -1164,6 +1222,23 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
                   onMouseLeave={e => { if (!showDetails) e.currentTarget.style.background = "transparent"; }}
                 >
                   <Info className="h-4 w-4" />
+                </button>
+              )}
+              {isPdf && (
+                <button
+                  onClick={handleOpenInSystemApp}
+                  title="Open in System Default PDF Viewer"
+                  className="flex items-center gap-1.5 h-7 px-2.5 text-[12px] font-semibold rounded-lg cursor-pointer transition-colors duration-150 mr-1"
+                  style={{
+                    color: colors.text,
+                    background: colors.badgeBg,
+                    border: `1px solid ${colors.badgeBdr}`,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.hover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = colors.badgeBg)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-blue-500" />
+                  <span className="hidden sm:inline">Open in System Viewer</span>
                 </button>
               )}
               <button
@@ -1770,12 +1845,35 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
             {/* PDF */}
             {isPdf && contentUrl && (
-              <iframe
-                src={contentUrl}
-                title={file.name}
-                className="absolute inset-0 w-full h-full border-0"
-                style={{ background: "white" }}
-              />
+              <div className="absolute inset-0 w-full h-full flex flex-col bg-[#323639]">
+                <object
+                  data={`${contentUrl}#toolbar=1`}
+                  type="application/pdf"
+                  className="w-full h-full border-0"
+                >
+                  <iframe
+                    src={contentUrl}
+                    title={file.name}
+                    className="w-full h-full border-0"
+                    style={{ background: "#323639" }}
+                  >
+                    <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-white">
+                      <FileText className="h-16 w-16 text-red-400 mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">{file.name}</h3>
+                      <p className="text-sm text-slate-300 mb-6 max-w-sm">
+                        Click below to view this document in your default PDF viewer.
+                      </p>
+                      <button
+                        onClick={handleOpenInSystemApp}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm cursor-pointer shadow-md transition-colors"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Open in System PDF Viewer
+                      </button>
+                    </div>
+                  </iframe>
+                </object>
+              </div>
             )}
 
             {/* MARKDOWN — Elevated Document Sheet */}

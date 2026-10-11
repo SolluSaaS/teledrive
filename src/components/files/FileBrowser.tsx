@@ -58,6 +58,7 @@ import { isEditableFile } from "@/lib/files/editableTypes";
 import { useFileBrowserDragAndDrop } from "@/hooks/useFileBrowserDragAndDrop";
 import { collapseDuplicateFolders, dedupeByContentKey, dedupeByMessageId, folderIdForPath } from "@/lib/storage/metadataStore";
 import { isBackupItem, BACKUP_ROOT, BACKUP_ROOT_PREFIX } from "@/lib/backup/visibility";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Utility: human-readable file size
@@ -556,6 +557,45 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
 
   const handleDownload = useCallback((file: TeleFile) => {
     window.dispatchEvent(new CustomEvent("teledrive-download-file", { detail: file }));
+  }, []);
+
+  const handleOpenSystemApp = useCallback(async (file: TeleFile) => {
+    try {
+      const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      const { exists } = await import("@tauri-apps/plugin-fs");
+      const { downloadFileToBuffer } = await import("@/lib/telegram/downloader");
+      const { saveBinaryFile } = await import("@/lib/storage/safeFileWriter");
+      const { readOfflineCache, isCachedOffline } = await import("@/lib/storage/offlineStorage");
+
+      const cacheDir = await appLocalDataDir();
+      const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "file";
+      const tempFilePath = await join(cacheDir, `temp_${file.id}_${safeName}`);
+
+      let fileReady = false;
+      try {
+        fileReady = await exists(tempFilePath);
+      } catch (_) {
+        fileReady = false;
+      }
+
+      if (!fileReady) {
+        if (file.offline && (await isCachedOffline(file.id))) {
+          const offlineBuf = await readOfflineCache(file.id);
+          await saveBinaryFile(tempFilePath, offlineBuf);
+        } else {
+          toast.info(`Preparing "${file.name}" for system application...`);
+          const buf = await downloadFileToBuffer(file.channelId, file.messageId);
+          await saveBinaryFile(tempFilePath, buf);
+        }
+      }
+
+      await openPath(tempFilePath);
+      toast.success(`Opened "${file.name}" in system viewer.`);
+    } catch (err: any) {
+      console.error("Failed to open file in system app:", err);
+      toast.error(`Could not open in system viewer: ${err.message || "Unknown error"}`);
+    }
   }, []);
 
   const triggerUpload = useCallback(() => {
@@ -1096,6 +1136,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                       key={file.id}
                       file={file}
                       onPreview={toastPreview}
+                      onOpenInSystemApp={handleOpenSystemApp}
                       onEdit={handleEdit}
                       onDownload={handleDownload}
                       onRename={openRenameDialog}
@@ -1235,6 +1276,7 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
                     key={file.id}
                     file={file}
                     onPreview={toastPreview}
+                    onOpenInSystemApp={handleOpenSystemApp}
                     onEdit={handleEdit}
                     onDownload={handleDownload}
                     onRename={openRenameDialog}
