@@ -21,8 +21,14 @@ mkdir -p "$STAGE_DIR"
 mkdir -p "$DIST_DIR"
 mkdir -p "$(dirname "$BUNDLE_DMG")"
 
-echo "=== [2/6] Copying TeleDrive.app into staging ==="
-cp -R "$SRC_APP" "$STAGE_DIR/TeleDrive.app"
+# Prefer extracting clean universal app tarball from GitHub Actions if available
+if [ -f "$DIST_DIR/TeleDrive_universal.app.tar.gz" ]; then
+    echo "=== [2/6] Extracting production TeleDrive.app from universal tarball ==="
+    tar -xzf "$DIST_DIR/TeleDrive_universal.app.tar.gz" -C "$STAGE_DIR/"
+else
+    echo "=== [2/6] Copying TeleDrive.app from $SRC_APP ==="
+    cp -R "$SRC_APP" "$STAGE_DIR/TeleDrive.app"
+fi
 
 echo "=== [3/6] Setting permissions & stripping quarantine ==="
 chmod -R u+w "$STAGE_DIR/TeleDrive.app"
@@ -57,8 +63,10 @@ hdiutil create -volname "TeleDrive" \
                -format UDZO \
                "$OUTPUT_DMG"
 
-# Copy to bundle directory as well so both locations are populated
-cp "$OUTPUT_DMG" "$BUNDLE_DMG"
+# Copy to bundle and distribution directories as well
+cp "$OUTPUT_DMG" "$BUNDLE_DMG" 2>/dev/null || true
+mkdir -p "$PROJECT_DIR/distribution"
+cp "$OUTPUT_DMG" "$PROJECT_DIR/distribution/teledrive.dmg"
 
 # Clean up staging
 rm -rf "$STAGE_DIR"
