@@ -40,51 +40,15 @@ export default defineConfig(async () => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // ── CRITICAL: telegram + its Buffer/polyfill deps MUST be in the same chunk ──
-          // Separating "buffer" from "telegram" creates two different Buffer class
-          // instances. GramJS's serializeBytes() does `instanceof Buffer` — when the
-          // passwordConfig bytes come from a different chunk's Buffer, this check fails
-          // with "Bytes or str expected, not Uint8Array" on Windows WebView2.
-          // Solution: keep telegram AND buffer in one chunk so they share a class ref.
-          if (
-            id.includes("node_modules/telegram") ||
-            id.includes("node_modules/node-stdlib-browser") ||
-            id.includes("node_modules/buffer") ||
-            id.includes("node_modules/big-integer") ||
-            id.includes("node_modules/events") ||
-            id.includes("vite-plugin-node-polyfills")
-          ) {
-            return "telegram-vendor";
-          }
-          // Split CodeMirror into its own large chunk (970KB+ raw)
+          // Split CodeMirror into its own large chunk (970KB+ raw) so it is only loaded when needed
           if (id.includes("node_modules/@codemirror") || id.includes("node_modules/@lezer")) {
             return "codemirror-vendor";
-          }
-          // React core — tiny but changes often break caching if mixed
-          if (
-            id.includes("node_modules/react/") ||
-            id.includes("node_modules/react-dom/") ||
-            id.includes("node_modules/scheduler/")
-          ) {
-            return "react-vendor";
-          }
-          // Radix UI + shadcn/ui components
-          if (id.includes("node_modules/@radix-ui") || id.includes("node_modules/cmdk")) {
-            return "ui-vendor";
-          }
-          // react-router-dom
-          if (id.includes("node_modules/react-router") || id.includes("node_modules/@remix-run")) {
-            return "router-vendor";
-          }
-          // Zustand state management
-          if (id.includes("node_modules/zustand")) {
-            return "state-vendor";
           }
         },
       },
     },
-    // Raise the warning threshold (we already split; remaining chunks are expected large)
-    chunkSizeWarningLimit: 800,
+    // Raise the warning threshold since telegram MTProto client is ~1.5MB
+    chunkSizeWarningLimit: 2500,
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
