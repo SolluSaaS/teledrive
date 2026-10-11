@@ -692,7 +692,11 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
 
   // ── Handlers (memoized) ──────────────────────────────────────────────────
   const handleDownload = useCallback(() => {
-    if (file) downloadFileFromTelegram(file.channelId, file.messageId, file.name);
+    if (file) {
+      downloadFileFromTelegram(file.channelId, file.messageId, file.name).catch((err) => {
+        console.error("Download failed:", err);
+      });
+    }
   }, [file]);
 
   const handleEnterEdit = useCallback(() => {

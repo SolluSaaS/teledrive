@@ -1,6 +1,6 @@
 import { getClient } from "./client";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { saveBinaryFile } from "../storage/safeFileWriter";
 import { toast } from "sonner";
 
 /**
@@ -40,6 +40,7 @@ export async function downloadFileFromTelegram(
   onProgress?: (progress: number) => void
 ): Promise<void> {
   const client = getClient();
+  const toastId = `download-${messageId}-${Date.now()}`;
   
   try {
     if (!client.connected) {
@@ -68,7 +69,6 @@ export async function downloadFileFromTelegram(
       return;
     }
     
-    const toastId = `download-${messageId}-${Date.now()}`;
     toast.loading(`Downloading "${fileName}"... 0%`, { id: toastId });
     
     // Download the media buffer from Telegram
@@ -92,13 +92,12 @@ export async function downloadFileFromTelegram(
       throw new Error("Failed to download media buffer from Telegram.");
     }
     
-    // Save the file to disk
-    await writeFile(targetPath, buffer);
+    // Save the file to disk using robust native binary writer
+    await saveBinaryFile(targetPath, buffer);
     toast.success(`"${fileName}" downloaded successfully!`, { id: toastId });
   } catch (error: any) {
     console.error("Failed to download file:", error);
-    toast.error(error.message || "Failed to download file.");
-    throw error;
+    toast.error("Failed to download file. Please check permissions and try again.", { id: toastId });
   }
 }
 
@@ -144,7 +143,14 @@ export async function downloadFileToBuffer(
       throw new Error("Failed to download media.");
     }
     
-    return buffer;
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer(buffer)) {
+      return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    } else if (buffer instanceof Uint8Array) {
+      return buffer;
+    } else if (buffer instanceof ArrayBuffer) {
+      return new Uint8Array(buffer);
+    }
+    return new Uint8Array(buffer);
   } catch (error: any) {
     console.error("Failed to download file to buffer:", error);
     throw error;

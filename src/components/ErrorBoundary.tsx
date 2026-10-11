@@ -1,5 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from "react";
-import { AlertTriangle, RotateCcw } from "lucide-react";
+import { AlertCircle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -22,27 +22,29 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error in TeleDrive:", error, errorInfo);
+    console.error("Uncaught error caught by ErrorBoundary:", error, errorInfo);
   }
 
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 p-6 text-center select-none">
+        <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-950 text-white p-6 text-center select-none">
           <div className="relative mb-6">
-            <div className="absolute inset-0 bg-red-100/40 dark:bg-red-950/20 blur-xl rounded-full scale-150 animate-pulse" />
-            <AlertTriangle className="relative h-16 w-16 text-red-500 stroke-[1.5]" />
+            <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full scale-150" />
+            <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-900 border border-slate-800 shadow-xl backdrop-blur-md">
+              <AlertCircle className="h-10 w-10 text-blue-400 stroke-[1.5]" />
+            </div>
           </div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Something went wrong</h2>
-          <p className="text-xs text-muted-foreground max-w-sm mb-6 leading-relaxed">
-            {this.state.error?.message || "An unexpected error occurred. Please refresh the page or try again."}
+          <h2 className="text-xl font-semibold text-slate-100 mb-2">Something went wrong</h2>
+          <p className="text-sm text-slate-400 max-w-sm mb-6 leading-relaxed">
+            An unexpected issue occurred. Please reload the application to continue.
           </p>
           <Button
             onClick={() => window.location.reload()}
-            className="rounded-xl bg-brand-500 hover:bg-brand-600 font-semibold px-5 text-sm gap-1.5 shadow-sm text-white"
+            className="rounded-xl bg-blue-600 hover:bg-blue-500 font-semibold px-6 py-2.5 text-sm gap-2 shadow-lg shadow-blue-600/20 text-white transition-all duration-200"
           >
             <RotateCcw className="h-4 w-4" />
-            Reload Page
+            Reload Application
           </Button>
         </div>
       );
