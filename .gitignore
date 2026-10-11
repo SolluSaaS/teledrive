@@ -32,4 +32,10 @@ dist-ssr
 vault_state.log
 buildfiles/
 *.dmg
-
+distribution/
+*.exe
+*.msi
+*.AppImage
+*.deb
+*.rpm
+release-dist
