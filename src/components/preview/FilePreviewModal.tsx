@@ -53,7 +53,7 @@ import { downloadFileToBuffer, downloadFileFromTelegram } from "@/lib/telegram/d
 import { updateFileLocal, deleteTelegramMessage } from "@/lib/storage/metadataStore";
 import { uploadFileToTelegram } from "@/lib/telegram/uploader";
 import { enqueueSave } from "@/lib/storage/indexQueue";
-import { readOfflineCache, getOfflineFilePath } from "@/lib/storage/offlineStorage";
+import { readOfflineCache } from "@/lib/storage/offlineStorage";
 import { saveBinaryFile } from "@/lib/storage/safeFileWriter";
 import { useFileStore } from "@/stores/fileStore";
 import { Button } from "@/components/ui/button";
@@ -717,25 +717,34 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
     try {
       const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
       const { openPath } = await import("@tauri-apps/plugin-opener");
+      const { exists } = await import("@tauri-apps/plugin-fs");
+      const { readOfflineCache, isCachedOffline } = await import("@/lib/storage/offlineStorage");
 
-      let filePathToOpen = "";
-      if (file.offline) {
-        filePathToOpen = await getOfflineFilePath(file.id);
-      } else if (pdfBufferRef.current) {
-        const cacheDir = await appLocalDataDir();
-        const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "document.pdf";
-        filePathToOpen = await join(cacheDir, `temp_${file.id}_${safeName}`);
-        await saveBinaryFile(filePathToOpen, pdfBufferRef.current);
-      } else {
-        toast.info("Preparing document for system viewer...");
-        const buf = await downloadFileToBuffer(file.channelId, file.messageId);
-        const cacheDir = await appLocalDataDir();
-        const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "document.pdf";
-        filePathToOpen = await join(cacheDir, `temp_${file.id}_${safeName}`);
-        await saveBinaryFile(filePathToOpen, buf);
+      const cacheDir = await appLocalDataDir();
+      const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "document.pdf";
+      const tempFilePath = await join(cacheDir, `temp_${file.id}_${safeName}`);
+
+      let fileReady = false;
+      try {
+        fileReady = await exists(tempFilePath);
+      } catch (_) {
+        fileReady = false;
       }
 
-      await openPath(filePathToOpen);
+      if (!fileReady) {
+        if (pdfBufferRef.current) {
+          await saveBinaryFile(tempFilePath, pdfBufferRef.current);
+        } else if (file.offline && (await isCachedOffline(file.id))) {
+          const offlineBuf = await readOfflineCache(file.id);
+          await saveBinaryFile(tempFilePath, offlineBuf);
+        } else {
+          toast.info("Preparing document for system viewer...");
+          const buf = await downloadFileToBuffer(file.channelId, file.messageId);
+          await saveBinaryFile(tempFilePath, buf);
+        }
+      }
+
+      await openPath(tempFilePath);
       toast.success("Opened document in system viewer.");
     } catch (err: any) {
       console.error("Failed to open document in system app:", err);

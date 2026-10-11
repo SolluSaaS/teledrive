@@ -563,23 +563,34 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
     try {
       const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
       const { openPath } = await import("@tauri-apps/plugin-opener");
+      const { exists } = await import("@tauri-apps/plugin-fs");
       const { downloadFileToBuffer } = await import("@/lib/telegram/downloader");
       const { saveBinaryFile } = await import("@/lib/storage/safeFileWriter");
-      const { getOfflineFilePath } = await import("@/lib/storage/offlineStorage");
+      const { readOfflineCache, isCachedOffline } = await import("@/lib/storage/offlineStorage");
 
-      let filePathToOpen = "";
-      if (file.offline) {
-        filePathToOpen = await getOfflineFilePath(file.id);
-      } else {
-        toast.info(`Preparing "${file.name}" for system application...`);
-        const buf = await downloadFileToBuffer(file.channelId, file.messageId);
-        const cacheDir = await appLocalDataDir();
-        const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "file";
-        filePathToOpen = await join(cacheDir, `temp_${file.id}_${safeName}`);
-        await saveBinaryFile(filePathToOpen, buf);
+      const cacheDir = await appLocalDataDir();
+      const safeName = file.name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "file";
+      const tempFilePath = await join(cacheDir, `temp_${file.id}_${safeName}`);
+
+      let fileReady = false;
+      try {
+        fileReady = await exists(tempFilePath);
+      } catch (_) {
+        fileReady = false;
       }
 
-      await openPath(filePathToOpen);
+      if (!fileReady) {
+        if (file.offline && (await isCachedOffline(file.id))) {
+          const offlineBuf = await readOfflineCache(file.id);
+          await saveBinaryFile(tempFilePath, offlineBuf);
+        } else {
+          toast.info(`Preparing "${file.name}" for system application...`);
+          const buf = await downloadFileToBuffer(file.channelId, file.messageId);
+          await saveBinaryFile(tempFilePath, buf);
+        }
+      }
+
+      await openPath(tempFilePath);
       toast.success(`Opened "${file.name}" in system viewer.`);
     } catch (err: any) {
       console.error("Failed to open file in system app:", err);
