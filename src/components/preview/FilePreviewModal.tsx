@@ -606,7 +606,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
           isSvgFile
         ) {
           const blobMime = isPdfFile ? "application/pdf" : isSvgFile ? "image/svg+xml" : file.mime;
-          const blob = new Blob([buffer], { type: blobMime });
+          const blob = new Blob([buffer as any], { type: blobMime });
           if (current) {
             setContentUrl((prev) => {
               if (prev) URL.revokeObjectURL(prev);
@@ -669,7 +669,7 @@ export function FilePreviewModal({ file, initialEditMode = false, onClose }: Pro
             setIsEditMode(true);
           }
         } else if (!contentUrl && !file.mime.startsWith("image/") && !file.mime.startsWith("video/") && !file.mime.startsWith("audio/") && !isPdfFile) {
-          const blob = new Blob([buffer], { type: file.mime || "application/octet-stream" });
+          const blob = new Blob([buffer as any], { type: file.mime || "application/octet-stream" });
           if (current) {
             setContentUrl((prev) => {
               if (prev) URL.revokeObjectURL(prev);
