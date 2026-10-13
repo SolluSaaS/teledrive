@@ -2,6 +2,9 @@ name: Release Build
 
 on:
   push:
+    branches:
+      - main
+      - pro
     tags:
       - 'v*'
   workflow_dispatch:
@@ -39,7 +42,8 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libfuse2
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -51,6 +55,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install dependencies
         run: npm ci

@@ -412,8 +412,13 @@ export default function AuthPage() {
       console.error("2FA Verification failed:", err);
       const msg = err.message || "";
       // Translate raw Telegram errors into user-friendly messages
-      if (msg.includes("PASSWORD_HASH_INVALID") || msg.includes("Incorrect password") || msg.includes("hash")) {
+      if (msg.includes("FLOOD_WAIT")) {
+        const seconds = msg.match(/\d+/)?.[0] || "a few";
+        setError(`Too many attempts. Please wait ${seconds} seconds before trying again.`);
+      } else if (msg.includes("PASSWORD_HASH_INVALID") || msg.includes("Incorrect password")) {
         setError("Incorrect password. Please check and try again.");
+      } else if (msg.includes("PASSWORD_EMPTY")) {
+        setError("Password cannot be empty.");
       } else if (msg.includes("Platform compatibility")) {
         setError(msg);
       } else {
