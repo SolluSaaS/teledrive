@@ -1,4 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   HardDrive,
   Clock,
@@ -12,18 +13,12 @@ import {
   RefreshCw,
   Cloud,
   Shield,
-  FolderPlus,
   Upload,
-  Folder,
   Sun,
   Moon,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DriveSidebar } from "./DriveSidebar";
+import { NewActionButton } from "./NewActionButton";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useFileStore } from "@/stores/fileStore";
@@ -34,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
-import { useEffect, useMemo, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { bootstrapTeleDrive } from "@/lib/telegram/bootstrap";
 import { isBackupItem } from "@/lib/backup/visibility";
@@ -56,6 +50,89 @@ import {
 import { getModKey } from "@/lib/os";
 
 const DND_PAYLOAD_MIME = "application/x-teledrive-item-ids";
+
+const IndexQueuePill = React.memo(function IndexQueuePill() {
+  const isSyncing = useFileStore((state) => state.isSyncing);
+  const indexQueueState = useFileStore((state) => state.indexQueueState);
+  const indexQueueRetryInSec = useFileStore((state) => state.indexQueueRetryInSec);
+  const indexQueueError = useFileStore((state) => state.indexQueueError);
+
+  if (
+    indexQueueState !== "failed" &&
+    indexQueueState !== "retrying" &&
+    (!isSyncing || indexQueueState !== "saving") &&
+    indexQueueState !== "syncing-remote" &&
+    indexQueueState !== "backup-running"
+  ) {
+    return null;
+  }
+
+  return (
+    <div
+      title={
+        indexQueueState === "failed"
+          ? indexQueueError ?? "Index save failed — click to retry"
+          : indexQueueState === "retrying" && indexQueueError
+          ? indexQueueError
+          : indexQueueState === "syncing-remote"
+          ? "Live multi-device sync"
+          : indexQueueState === "backup-running"
+          ? "Backup snapshot in progress"
+          : undefined
+      }
+      className={cn(
+        "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border text-xs",
+        indexQueueState === "failed"
+          ? "bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700/50 text-amber-800 dark:text-amber-200"
+          : indexQueueState === "syncing-remote" || indexQueueState === "backup-running"
+          ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-200"
+          : "bg-[#edf2fc] dark:bg-[#282a2c] border-transparent text-[#444746] dark:text-[#c4c7c5]"
+      )}
+    >
+      {indexQueueState === "failed" ? (
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+      ) : indexQueueState === "syncing-remote" ? (
+        <Cloud className="h-3.5 w-3.5 shrink-0" />
+      ) : indexQueueState === "backup-running" ? (
+        <Shield className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0b57d0] shrink-0" />
+      )}
+      <span className="text-[11px] font-semibold">
+        {indexQueueState === "failed"
+          ? "Save failed"
+          : indexQueueState === "retrying" && indexQueueRetryInSec > 0
+          ? `Retrying in ${indexQueueRetryInSec}s`
+          : indexQueueState === "syncing-remote"
+          ? "Synced"
+          : indexQueueState === "backup-running"
+          ? "Backup in progress"
+          : "Syncing"}
+      </span>
+      {indexQueueState === "failed" && (
+        <button
+          type="button"
+          onClick={() => {
+            const fn = (window as any).__teledriveRetryIndex;
+            const phone = useAuthStore.getState().phoneNumber;
+            if (typeof fn === "function" && phone) {
+              import("@/lib/secure/vault").then(({ getSecret, channelIdKey, VAULT_KEY_CHANNEL_ID }) =>
+                getSecret(channelIdKey(phone))
+                  .then((cid) => cid || getSecret(VAULT_KEY_CHANNEL_ID))
+                  .then((cid) => cid && fn(cid))
+                  .catch(() => fn(phone))
+              );
+            }
+          }}
+          className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 text-[10px] font-semibold uppercase tracking-wide cursor-pointer"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Retry
+        </button>
+      )}
+    </div>
+  );
+});
 
 export default function DriveLayout() {
   const navigate = useNavigate();
@@ -97,27 +174,27 @@ export default function DriveLayout() {
     [],
   );
 
-  const handleSidebarDragOver = (e: React.DragEvent, path: string) => {
+  const handleSidebarDragOver = useCallback((e: React.DragEvent, path: string) => {
     if (actionableSidebarPaths.has(path)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
     }
-  };
+  }, [actionableSidebarPaths]);
 
-  const handleSidebarDragEnter = (e: React.DragEvent, path: string) => {
+  const handleSidebarDragEnter = useCallback((e: React.DragEvent, path: string) => {
     if (actionableSidebarPaths.has(path)) {
       e.preventDefault();
       setSidebarDragOverPath(path);
     }
-  };
+  }, [actionableSidebarPaths]);
 
-  const handleSidebarDragLeave = (e: React.DragEvent) => {
+  const handleSidebarDragLeave = useCallback((e: React.DragEvent) => {
     // Only clear highlight when actually leaving the sidebar item (not entering a child)
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setSidebarDragOverPath(null);
-  };
+  }, []);
 
-  const handleSidebarDrop = async (e: React.DragEvent, path: string) => {
+  const handleSidebarDrop = useCallback(async (e: React.DragEvent, path: string) => {
     e.preventDefault();
     setSidebarDragOverPath(null);
 
@@ -151,7 +228,7 @@ export default function DriveLayout() {
     }
 
     useFileStore.getState().clearSelection();
-  };
+  }, [actionableSidebarPaths, archiveMultiple, moveMultipleFilesOrFolders, moveMultipleToTrash, starMultiple]);
 
   // Pull-to-refresh states
   const [pullProgress, setPullProgress] = useState(0);
@@ -362,11 +439,7 @@ export default function DriveLayout() {
   const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
 
   const files = useFileStore((state) => state.files);
-  const isSyncing = useFileStore((state) => state.isSyncing);
   const draggedItemIds = useFileStore((state) => state.draggedItemIds);
-  const indexQueueState = useFileStore((state) => state.indexQueueState);
-  const indexQueueRetryInSec = useFileStore((state) => state.indexQueueRetryInSec);
-  const indexQueueError = useFileStore((state) => state.indexQueueError);
 
   useEffect(() => {
     if (draggedItemIds.length === 0) {
@@ -490,147 +563,6 @@ export default function DriveLayout() {
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
 
-  // Iconic 4-color Google Drive plus icon with seamless geometry and rounded caps
-  const GooglePlusIcon = ({ className }: { className?: string }) => (
-    <svg className={cn("w-6 h-6 shrink-0", className)} viewBox="0 0 24 24" fill="none">
-      {/* Top arm (Red) */}
-      <path d="M12 4c-.83 0-1.5.67-1.5 1.5V11h3V5.5c0-.83-.67-1.5-1.5-1.5z" fill="#EA4335" />
-      {/* Right arm (Blue) */}
-      <path d="M18.5 10.5H13v3h5.5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z" fill="#4285F4" />
-      {/* Bottom arm (Green) */}
-      <path d="M12 20c.83 0 1.5-.67 1.5-1.5V13h-3v5.5c0 .83.67 1.5 1.5 1.5z" fill="#34A853" />
-      {/* Left arm (Yellow) */}
-      <path d="M5.5 10.5C4.67 10.5 4 11.17 4 12s.67 1.5 1.5 1.5H11v-3H5.5z" fill="#FBBC05" />
-      {/* Center junction */}
-      <rect x="10.5" y="10.5" width="3" height="3" fill="#4285F4" />
-    </svg>
-  );
-
-  // Google Drive "+ New" button & mobile FAB
-  const NewActionButton = ({ className, isFab = false }: { className?: string; isFab?: boolean }) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="New item"
-          className={cn(
-            isFab
-              ? "fixed bottom-20 right-5 z-40 h-14 w-14 rounded-2xl bg-white dark:bg-[#282a2c] text-[#1f1f1f] dark:text-[#e3e3e3] border border-slate-200/80 dark:border-[#3c4043]/50 shadow-xl flex items-center justify-center cursor-pointer active:scale-95 transition-all"
-              : "inline-flex items-center gap-3.5 h-14 min-w-[124px] px-5 rounded-2xl bg-white dark:bg-[#282a2c] text-[#1f1f1f] dark:text-[#e3e3e3] border border-transparent dark:border-[#3c4043]/50 shadow-[0_1px_2px_0_rgba(60,64,67,0.3),0_1px_3px_1px_rgba(60,64,67,0.15)] hover:shadow-[0_1px_3px_0_rgba(60,64,67,0.3),0_4px_8px_3px_rgba(60,64,67,0.15)] dark:shadow-[0_1px_2px_0_rgba(0,0,0,0.5)] dark:hover:shadow-[0_2px_6px_2px_rgba(0,0,0,0.6)] hover:bg-[#f8fafd] dark:hover:bg-[#333537] transition-all duration-200 cursor-pointer select-none active:scale-[0.98]",
-            className
-          )}
-        >
-          <GooglePlusIcon />
-          {!isFab && <span className="text-sm font-semibold tracking-wide text-[#1f1f1f] dark:text-[#e3e3e3]">New</span>}
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={isFab ? "end" : "start"}
-        side={isFab ? "top" : "bottom"}
-        sideOffset={8}
-        className="w-56 p-1.5 rounded-2xl bg-white dark:bg-[#282a2c] border border-slate-200/90 dark:border-slate-700/80 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_1px_4px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.6)] z-50 animate-in fade-in zoom-in-95"
-      >
-        <DropdownMenuItem
-          onClick={() => window.dispatchEvent(new CustomEvent("teledrive-trigger-create-folder"))}
-          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
-        >
-          <FolderPlus className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
-          <span>New folder</span>
-        </DropdownMenuItem>
-        <div className="h-px bg-slate-200/70 dark:bg-slate-700/60 my-1.5" />
-        <DropdownMenuItem
-          onClick={() => triggerFilePicker()}
-          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
-        >
-          <Upload className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
-          <span>File upload</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => triggerFolderPicker()}
-          className="rounded-xl text-xs font-semibold px-3.5 py-2.5 cursor-pointer hover:bg-[#f0f4f9] dark:hover:bg-[#333537] flex items-center gap-3 text-[#1f1f1f] dark:text-[#e3e3e3]"
-        >
-          <Folder className="h-4.5 w-4.5 text-[#444746] dark:text-[#c4c7c5]" />
-          <span>Folder upload</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
-  const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-background select-none">
-      {/* Google Drive "+ New" button */}
-      <div className="px-4 pt-3 pb-3">
-        <NewActionButton />
-      </div>
-
-      {/* Navigation items: Google Drive full-rounded pills */}
-      <nav className="flex-1 px-3 space-y-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive =
-            location.pathname === item.path ||
-            (item.path === "/drive/my-drive" && location.pathname.startsWith("/drive/folder/")) ||
-            (item.path === "/drive/backups" && location.pathname.startsWith("/drive/backups"));
-          return (
-            <Link
-              key={item.label}
-              to={item.path}
-              onClick={() => isMobile && setSidebarOpen(false)}
-              onDragOver={(e) => handleSidebarDragOver(e, item.path)}
-              onDragEnter={(e) => handleSidebarDragEnter(e, item.path)}
-              onDragLeave={handleSidebarDragLeave}
-              onDrop={(e) => handleSidebarDrop(e, item.path)}
-              onMouseEnter={() => {
-                if (draggedItemIds.length > 0 && actionableSidebarPaths.has(item.path)) {
-                  setSidebarDragOverPath(item.path);
-                }
-              }}
-              onMouseLeave={() => {
-                if (draggedItemIds.length > 0 && sidebarDragOverPath === item.path) {
-                  setSidebarDragOverPath(null);
-                }
-              }}
-              data-drop-target={item.dropTarget ?? undefined}
-              className={cn(
-                "flex items-center gap-3.5 px-4 h-10 rounded-full text-sm font-medium transition-colors select-none cursor-pointer",
-                isActive
-                  ? "bg-[#c2e7ff] text-[#001d35] font-semibold dark:bg-[#004a77] dark:text-[#c2e7ff]"
-                  : sidebarDragOverPath === item.path
-                  ? "bg-[#c2e7ff]/70 text-[#001d35] dark:bg-[#004a77]/70 dark:text-[#c2e7ff]"
-                  : "text-[#444746] dark:text-[#c4c7c5] hover:bg-[#e9eef6] dark:hover:bg-[#282a2c] hover:text-[#1f1f1f] dark:hover:text-[#e3e3e3]"
-              )}
-            >
-              <Icon className={cn("h-4.5 w-4.5 shrink-0", isActive ? "text-[#001d35] dark:text-[#c2e7ff]" : "text-[#444746] dark:text-[#c4c7c5]")} />
-              <span className="flex-1 truncate">{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Storage panel: Google Drive Cloud Storage meter */}
-      <div className="px-4 pb-4 pt-3 space-y-2.5 select-none border-t border-slate-200/50 dark:border-slate-800/40">
-        <div className="flex items-center gap-2 text-xs font-semibold text-[#444746] dark:text-[#c4c7c5]">
-          <Cloud className="h-4.5 w-4.5 text-[#0b57d0] dark:text-[#a8c7fa]" />
-          <span>Storage</span>
-        </div>
-        
-        {/* Google style linear progress bar */}
-        <div className="w-full h-1 bg-[#e0e2ec] dark:bg-[#36373a] rounded-full overflow-hidden">
-          <div className="h-full bg-[#0b57d0] dark:bg-[#a8c7fa] rounded-full w-2" />
-        </div>
-
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-[#444746] dark:text-[#c4c7c5]">
-            <strong className="font-semibold text-[#1f1f1f] dark:text-[#e3e3e3]">{formattedUsedSize}</strong> of Unlimited used
-          </span>
-          <span className="text-[11px] text-[#0b57d0] dark:text-[#a8c7fa] font-medium">
-            Telegram Cloud Storage
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div
       onDragEnter={handleDragEnter}
@@ -673,7 +605,20 @@ export default function DriveLayout() {
                     TeleDrive
                   </span>
                 </div>
-                <SidebarContent />
+                <DriveSidebar
+                  navItems={navItems}
+                  formattedUsedSize={formattedUsedSize}
+                  isMobile={isMobile}
+                  setSidebarOpen={setSidebarOpen}
+                  draggedItemIds={draggedItemIds}
+                  actionableSidebarPaths={actionableSidebarPaths}
+                  sidebarDragOverPath={sidebarDragOverPath}
+                  setSidebarDragOverPath={setSidebarDragOverPath}
+                  handleSidebarDragOver={handleSidebarDragOver}
+                  handleSidebarDragEnter={handleSidebarDragEnter}
+                  handleSidebarDragLeave={handleSidebarDragLeave}
+                  handleSidebarDrop={handleSidebarDrop}
+                />
               </SheetContent>
             </Sheet>
           )}
@@ -699,75 +644,7 @@ export default function DriveLayout() {
         {/* Right side items */}
         <div className="flex items-center gap-1.5 md:gap-2.5 shrink-0">
           {/* Index queue state pill */}
-          {(indexQueueState === "failed" ||
-            indexQueueState === "retrying" ||
-            (isSyncing && indexQueueState === "saving") ||
-            indexQueueState === "syncing-remote" ||
-            indexQueueState === "backup-running") && (
-            <div
-              title={
-                indexQueueState === "failed"
-                  ? indexQueueError ?? "Index save failed — click to retry"
-                  : indexQueueState === "retrying" && indexQueueError
-                  ? indexQueueError
-                  : indexQueueState === "syncing-remote"
-                  ? "Live multi-device sync"
-                  : indexQueueState === "backup-running"
-                  ? "Backup snapshot in progress"
-                  : undefined
-              }
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-full select-none animate-in fade-in duration-200 border text-xs",
-                indexQueueState === "failed"
-                  ? "bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700/50 text-amber-800 dark:text-amber-200"
-                  : indexQueueState === "syncing-remote" || indexQueueState === "backup-running"
-                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-200"
-                  : "bg-[#edf2fc] dark:bg-[#282a2c] border-transparent text-[#444746] dark:text-[#c4c7c5]"
-              )}
-            >
-              {indexQueueState === "failed" ? (
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              ) : indexQueueState === "syncing-remote" ? (
-                <Cloud className="h-3.5 w-3.5 shrink-0" />
-              ) : indexQueueState === "backup-running" ? (
-                <Shield className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0b57d0] shrink-0" />
-              )}
-              <span className="text-[11px] font-semibold">
-                {indexQueueState === "failed"
-                  ? "Save failed"
-                  : indexQueueState === "retrying" && indexQueueRetryInSec > 0
-                  ? `Retrying in ${indexQueueRetryInSec}s`
-                  : indexQueueState === "syncing-remote"
-                  ? "Synced"
-                  : indexQueueState === "backup-running"
-                  ? "Backup in progress"
-                  : "Syncing"}
-              </span>
-              {indexQueueState === "failed" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const fn = (window as any).__teledriveRetryIndex;
-                    const phone = useAuthStore.getState().phoneNumber;
-                    if (typeof fn === "function" && phone) {
-                      import("@/lib/secure/vault").then(({ getSecret, channelIdKey, VAULT_KEY_CHANNEL_ID }) =>
-                        getSecret(channelIdKey(phone))
-                          .then((cid) => cid || getSecret(VAULT_KEY_CHANNEL_ID))
-                          .then((cid) => cid && fn(cid))
-                          .catch(() => fn(phone))
-                      );
-                    }
-                  }}
-                  className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 text-[10px] font-semibold uppercase tracking-wide cursor-pointer"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
+          <IndexQueuePill />
 
           {/* Quick theme toggle */}
           <Button
@@ -815,7 +692,20 @@ export default function DriveLayout() {
         {/* Sidebar (Desktop) */}
         {!isMobile && (
           <aside className="w-[var(--sidebar-width)] bg-background shrink-0 z-10 flex flex-col">
-            <SidebarContent />
+            <DriveSidebar
+              navItems={navItems}
+              formattedUsedSize={formattedUsedSize}
+              isMobile={isMobile}
+              setSidebarOpen={setSidebarOpen}
+              draggedItemIds={draggedItemIds}
+              actionableSidebarPaths={actionableSidebarPaths}
+              sidebarDragOverPath={sidebarDragOverPath}
+              setSidebarDragOverPath={setSidebarDragOverPath}
+              handleSidebarDragOver={handleSidebarDragOver}
+              handleSidebarDragEnter={handleSidebarDragEnter}
+              handleSidebarDragLeave={handleSidebarDragLeave}
+              handleSidebarDrop={handleSidebarDrop}
+            />
           </aside>
         )}
 
