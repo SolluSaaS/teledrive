@@ -21,13 +21,16 @@ mkdir -p "$STAGE_DIR"
 mkdir -p "$DIST_DIR"
 mkdir -p "$(dirname "$BUNDLE_DMG")"
 
-# Prefer extracting clean universal app tarball from GitHub Actions if available
-if [ -f "$DIST_DIR/TeleDrive_universal.app.tar.gz" ]; then
-    echo "=== [2/6] Extracting production TeleDrive.app from universal tarball ==="
+# Prefer freshly compiled app from target/release/bundle/macos
+if [ -d "$SRC_APP" ]; then
+    echo "=== [2/6] Copying freshly built TeleDrive.app from $SRC_APP ==="
+    cp -R "$SRC_APP" "$STAGE_DIR/TeleDrive.app"
+elif [ -f "$DIST_DIR/TeleDrive_universal.app.tar.gz" ]; then
+    echo "=== [2/6] Extracting TeleDrive.app from universal tarball ==="
     tar -xzf "$DIST_DIR/TeleDrive_universal.app.tar.gz" -C "$STAGE_DIR/"
 else
-    echo "=== [2/6] Copying TeleDrive.app from $SRC_APP ==="
-    cp -R "$SRC_APP" "$STAGE_DIR/TeleDrive.app"
+    echo "ERROR: Neither $SRC_APP nor tarball found."
+    exit 1
 fi
 
 echo "=== [3/6] Setting permissions & stripping quarantine ==="
@@ -63,10 +66,17 @@ hdiutil create -volname "TeleDrive" \
                -format UDZO \
                "$OUTPUT_DMG"
 
-# Copy to bundle and distribution directories as well
 cp "$OUTPUT_DMG" "$BUNDLE_DMG" 2>/dev/null || true
 mkdir -p "$PROJECT_DIR/distribution"
 cp "$OUTPUT_DMG" "$PROJECT_DIR/distribution/teledrive.dmg"
+
+# If /Applications/TeleDrive.app exists, update it with the freshly signed app
+if [ -d "/Applications/TeleDrive.app" ]; then
+    echo "=== Updating /Applications/TeleDrive.app with latest build ==="
+    rm -rf "/Applications/TeleDrive.app"
+    cp -R "$STAGE_DIR/TeleDrive.app" "/Applications/TeleDrive.app"
+    xattr -cr "/Applications/TeleDrive.app" 2>/dev/null || true
+fi
 
 # Clean up staging
 rm -rf "$STAGE_DIR"

@@ -26,77 +26,78 @@
  *   Uint8Array→Buffer conversion if the first attempt fails (e.g. during dev).
  */
 
+import { Buffer } from "buffer";
 import { computeCheck } from "telegram/Password";
 
 /**
  * Coerce any TypedArray / Buffer-like value to a genuine Buffer from the
  * globally-patched `buffer` polyfill.
- *
- * We do NOT use `Buffer.from(value)` because if `value` comes from a different
- * polyfill instance, some runtimes skip the data copy and return the same
- * sub-class object. Instead we:
- *   1. Create a new Buffer with `Buffer.alloc(length)`
- *   2. Copy bytes manually using `Uint8Array.set`
- *
- * This guarantees the result passes GramJS's `instanceof Buffer` check.
  */
-function toBuffer(value: Uint8Array | Buffer | null | undefined): Buffer {
-  if (!value || value.byteLength === 0) return Buffer.alloc(0);
+export function toBuffer(value: any): Buffer {
+  if (!value) return Buffer.alloc(0);
+  if (value.byteLength === 0) return Buffer.alloc(0);
   const buf = Buffer.alloc(value.byteLength);
-  // Use raw Uint8Array.prototype.set — works regardless of the subclass
-  Uint8Array.prototype.set.call(buf, new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  // Copy bytes manually using Uint8Array.prototype.set
+  if (value.buffer) {
+    Uint8Array.prototype.set.call(buf, new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  } else {
+    Uint8Array.prototype.set.call(buf, new Uint8Array(value));
+  }
   return buf;
 }
 
 /**
  * Patched version of GramJS `computeCheck` that guarantees all byte fields in
- * the `passwordConfig` object are proper Buffer instances before the SRP
- * computation begins.
- *
- * Call this instead of importing `computeCheck` directly.
+ * both the `passwordConfig` input AND the returned `InputCheckPasswordSRP`
+ * result are proper Buffer instances before and after the SRP computation.
  */
 export async function safeComputeCheck(
   passwordConfig: Record<string, any>,
-  password: string
+  password: string | any
 ): Promise<any> {
+  // Passwords can be ANY format: arbitrary symbols, hashes (#, md5, sha, hex),
+  // unicode, emojis, numbers, leading/trailing whitespace, or special characters.
+  const rawPassword = typeof password === "string" ? password : (password != null ? String(password) : "");
+
   // ── Patch currentAlgo byte fields ─────────────────────────────────────────
   const algo = (passwordConfig as any).currentAlgo;
   if (algo) {
-    if (algo.p     instanceof Uint8Array) algo.p     = toBuffer(algo.p);
-    if (algo.salt1 instanceof Uint8Array) algo.salt1 = toBuffer(algo.salt1);
-    if (algo.salt2 instanceof Uint8Array) algo.salt2 = toBuffer(algo.salt2);
-    if (algo.g     !== undefined && typeof algo.g !== "number") {
-      // g must stay a number; nothing to do unless it was coerced
-    }
+    if (algo.p) algo.p = toBuffer(algo.p);
+    if (algo.salt1) algo.salt1 = toBuffer(algo.salt1);
+    if (algo.salt2) algo.salt2 = toBuffer(algo.salt2);
   }
 
   // ── Patch srpB (may appear as "srpB" or "srp_b" depending on GramJS version) ──
   const srp = passwordConfig as any;
-  if (srp.srpB instanceof Uint8Array) srp.srpB = toBuffer(srp.srpB);
-  if (srp.srp_b instanceof Uint8Array) srp.srp_b = toBuffer(srp.srp_b);
+  if (srp.srpB) srp.srpB = toBuffer(srp.srpB);
+  if (srp.srp_b) srp.srp_b = toBuffer(srp.srp_b);
 
   // ── Patch newAlgo if present (for password-change flows) ─────────────────
   const newAlgo = srp.newAlgo;
   if (newAlgo) {
-    if (newAlgo.salt1 instanceof Uint8Array) newAlgo.salt1 = toBuffer(newAlgo.salt1);
-    if (newAlgo.salt2 instanceof Uint8Array) newAlgo.salt2 = toBuffer(newAlgo.salt2);
-    if (newAlgo.p     instanceof Uint8Array) newAlgo.p     = toBuffer(newAlgo.p);
+    if (newAlgo.salt1) newAlgo.salt1 = toBuffer(newAlgo.salt1);
+    if (newAlgo.salt2) newAlgo.salt2 = toBuffer(newAlgo.salt2);
+    if (newAlgo.p) newAlgo.p = toBuffer(newAlgo.p);
   }
 
   // ── Patch secureRandom (if present) ──────────────────────────────────────
-  if (srp.secureRandom instanceof Uint8Array) srp.secureRandom = toBuffer(srp.secureRandom);
+  if (srp.secureRandom) srp.secureRandom = toBuffer(srp.secureRandom);
 
-  try {
-    return await computeCheck(passwordConfig as any, password);
-  } catch (err: any) {
-    // Surface a friendlier error so the user sees "Incorrect password" vs raw TypeError
-    const msg: string = err?.message ?? "";
-    if (msg.includes("Bytes or str expected") || msg.includes("instanceof")) {
-      throw new Error(
-        "Platform compatibility error during 2FA. Please restart the app and try again. " +
-        "(Details: " + msg + ")"
-      );
-    }
-    throw err;
+  const srpResult = await computeCheck(passwordConfig as any, rawPassword);
+
+  // ── CRITICAL: Patch returned InputCheckPasswordSRP byte fields ──────────
+  // computeCheck creates an Api.InputCheckPasswordSRP({ srpId, A, M1 }).
+  // GramJS's `serializeBytes()` validates `instanceof Buffer` on A and M1.
+  // Because crypto-browserify inside computeCheck generates hash digests using
+  // an internal buffer instance, we MUST coerce both A and M1 to the primary Buffer
+  // instance here, otherwise CheckPassword serialization throws:
+  //   "Bytes or str expected, not e".
+  if (srpResult) {
+    if (srpResult.A) srpResult.A = toBuffer(srpResult.A);
+    if (srpResult.M1) srpResult.M1 = toBuffer(srpResult.M1);
+    const raw = srpResult as any;
+    if (raw.srp_id && !raw.srpId) raw.srpId = raw.srp_id;
   }
+
+  return srpResult;
 }
