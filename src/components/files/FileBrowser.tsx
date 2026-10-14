@@ -609,18 +609,6 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
   }, []);
 
 
-  const handleItemClick = useCallback((e: React.MouseEvent, file: TeleFile) => {
-    if (suppressClickRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-    if (e.ctrlKey || e.metaKey || e.shiftKey) {
-      e.preventDefault();
-    }
-    toggleSelect(file.id);
-  }, [toggleSelect]);
-
   const handleItemDoubleClick = useCallback((file: TeleFile) => {
     if (suppressClickRef.current) return;
     const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
@@ -652,6 +640,24 @@ export function FileBrowser({ folderPath = "/", mode = "drive", searchQuery = ""
       toastPreview(file);
     }
   }, [clearSelection, navigate, toastPreview, mode]);
+
+  const handleItemClick = useCallback((e: React.MouseEvent, file: TeleFile) => {
+    if (suppressClickRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+    }
+    const isDir = file.mime === "inode/directory" || file.mime === "application/x-directory";
+    // On mobile touch devices without active multi-selection, single-tap a directory to navigate directly
+    if (isMobile && selectedIds.length === 0 && isDir) {
+      handleItemDoubleClick(file);
+      return;
+    }
+    toggleSelect(file.id);
+  }, [isMobile, selectedIds.length, handleItemDoubleClick, toggleSelect]);
 
   // Dialog actions
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
